@@ -145,7 +145,7 @@ def low_tariff_parser() -> argparse.ArgumentParser:
     )
     g.add_argument(
         "--holidays",
-        choices=["weekday", "sunday"],
+        choices=["weekday", "weekend"],
         help="public holidays use the hours of their weekday (default) or the weekend hours",
     )
     return p
@@ -157,8 +157,8 @@ def build_low_tariff(args: argparse.Namespace, ctx: Context) -> LowTariffSchedul
     hours = first(getattr(args, "low_tariff_hours", None), lt.get("hours"))
     weekend = first(getattr(args, "low_tariff_hours_weekend", None), lt.get("hours_weekend"))
     holidays = first(getattr(args, "holidays", None), lt.get("holidays"), "weekday")
-    if holidays not in ("weekday", "sunday"):
-        raise CliError(f"[low_tariff] holidays must be 'weekday' or 'sunday', not {holidays!r}")
+    if holidays not in ("weekday", "weekend"):
+        raise CliError(f"[low_tariff] holidays must be 'weekday' or 'weekend', not {holidays!r}")
     if hours is None:
         if weekend is not None:
             raise CliError("--low-tariff-hours-weekend needs --low-tariff-hours as well.")

@@ -23,7 +23,7 @@ First version, published as **egd-api-client** (command `egd`).
   with the `--negative` clamp modes.
 - `egd spot calc`: two-rate fixed comparison (`--fixed-price` = VT, `--fixed-price-low` = NT)
   with NT periods entered by the user only (`--low-tariff-hours`,
-  `--low-tariff-hours-weekend`, `--holidays weekday|sunday`, config `[low_tariff]`); NT
+  `--low-tariff-hours-weekend`, `--holidays weekday|weekend`, config `[low_tariff]`); NT
   consumption in the report. EG.D's OpenAPI provides no NT/HDO data, and nothing is
   downloaded or assumed.
 - `egd spot prices --currency czk|eur` (required); EUR uses OTE's own EUR prices in the hourly
@@ -34,7 +34,7 @@ First version, published as **egd-api-client** (command `egd`).
   `--distribution-monthly-fee`, config `[distribution]`; report lines `Spot + distrib.` /
   `Fixed + distrib.`, breakdown and export columns. EG.D's OpenAPI provides no distribution
   rate, breaker or fee data and no price tables are built in.
-- Full Czech documentation in `README.cs.md` (linked from `README.md`).
+- Documentation in Czech (`README.md`).
 - CSV/XLSX consumption import with column, unit, timestamp-convention and DST detection.
 - Config file `~/.config/egd-api-client/config.toml` with `[egd]`, `[spot]`, `[spot.fixed]`
   sections; environment variables `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`,

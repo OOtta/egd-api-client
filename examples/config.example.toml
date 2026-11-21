@@ -36,7 +36,7 @@ monthly_fee = 120
 [low_tariff]
 # hours = "22:00-06:00,13:00-15:00"        # every day (local time)
 # hours_weekend = "00:00-08:00,12:00-20:00" # optional, Saturday and Sunday
-# holidays = "weekday"                       # or "sunday": holidays use the weekend hours
+# holidays = "weekday"                       # or "weekend": holidays use the weekend hours
 
 # Your distribution charges – nothing is built in; CZK excl. VAT, added to spot and fixed.
 [distribution]

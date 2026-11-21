@@ -49,13 +49,13 @@ def test_dst_day_uses_local_wall_clock():
 
 def test_holiday_rule():
     weekday = LowTariffSchedule.parse("00:00-01:00", weekend="00:00-24:00")
-    sunday = LowTariffSchedule.parse("00:00-01:00", weekend="00:00-24:00", holidays="sunday")
+    weekend = LowTariffSchedule.parse("00:00-01:00", weekend="00:00-24:00", holidays="weekend")
     t = local(2025, 10, 28, 12, 0)  # Tuesday, public holiday
     assert weekday.low_fraction(t, QUARTER) == 0.0
-    assert sunday.low_fraction(t, QUARTER) == 1.0
+    assert weekend.low_fraction(t, QUARTER) == 1.0
 
 
 def test_describe():
-    s = LowTariffSchedule.parse("22:00-06:00", weekend="00:00-24:00", holidays="sunday")
-    assert s.describe() == "NT 00:00–06:00, 22:00–24:00; Sat/Sun 00:00–24:00; holidays as Sunday"
+    s = LowTariffSchedule.parse("22:00-06:00", weekend="00:00-24:00", holidays="weekend")
+    assert s.describe() == "NT 00:00–06:00, 22:00–24:00; Sat/Sun 00:00–24:00; holidays as weekend"
     assert LowTariffSchedule.parse("13:00-15:00").describe() == "NT 13:00–15:00"

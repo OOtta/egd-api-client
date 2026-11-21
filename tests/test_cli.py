@@ -340,3 +340,15 @@ def test_calc_distribution_errors(capsys, tmp_path):
     assert "--distribution-low needs the low-tariff hours" in capsys.readouterr().err
     assert main([*base, "--distribution-low", "1", "--low-tariff-hours", "22:00-06:00"]) == 2
     assert "needs --distribution-high" in capsys.readouterr().err
+
+
+def test_holidays_values(capsys, tmp_path, monkeypatch):
+    base = ["spot", "calc", "-i", str(sample_csv(tmp_path)), "--low-tariff-hours", "22:00-06:00"]
+    with pytest.raises(SystemExit):
+        main([*base, "--holidays", "sunday"])
+    assert "invalid choice" in capsys.readouterr().err
+    cfg = tmp_path / "c.toml"
+    cfg.write_text('[low_tariff]\nhours = "22:00-06:00"\nholidays = "sunday"\n')
+    monkeypatch.setenv("EGD_CONFIG", str(cfg))
+    assert main(["spot", "calc", "-i", str(sample_csv(tmp_path))]) == 2
+    assert "'weekday' or 'weekend'" in capsys.readouterr().err

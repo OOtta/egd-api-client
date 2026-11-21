@@ -16,7 +16,7 @@ from typing import Literal
 
 from egd_api_client.timeutil import PRAGUE
 
-HolidayRule = Literal["sunday", "weekday"]
+HolidayRule = Literal["weekday", "weekend"]
 Window = tuple[int, int]  # minutes from local midnight, [start, end), end ≤ 1440
 
 
@@ -117,7 +117,7 @@ class LowTariffSchedule:
     """NT windows for weekdays and for weekends (Saturday, Sunday).
 
     ``holidays``: ``weekday`` – a public holiday uses the windows of its actual weekday;
-    ``sunday`` – it uses the weekend windows.
+    ``weekend`` – it uses the weekend windows.
     """
 
     weekday: tuple[Window, ...]
@@ -132,7 +132,7 @@ class LowTariffSchedule:
         return cls(wd, parse_hours(weekend) if weekend is not None else wd, holidays)
 
     def windows_for(self, d: date) -> tuple[Window, ...]:
-        if d.isoweekday() >= 6 or (self.holidays == "sunday" and is_czech_holiday(d)):
+        if d.isoweekday() >= 6 or (self.holidays == "weekend" and is_czech_holiday(d)):
             return self.weekend
         return self.weekday
 
@@ -153,6 +153,6 @@ class LowTariffSchedule:
         text = f"NT {format_windows(self.weekday)}"
         if self.weekend != self.weekday:
             text += f"; Sat/Sun {format_windows(self.weekend)}"
-        if self.holidays == "sunday":
-            text += "; holidays as Sunday"
+        if self.holidays == "weekend":
+            text += "; holidays as weekend"
         return text
