@@ -78,11 +78,15 @@ Tariff:            spot × 1.15 + 400 CZK/MWh, fee 150 CZK/month, VAT 21 %
 Data coverage:     5860/5860 quarter-hours (100.0 %)
 
 Consumption:       865.107 kWh
-Avg spot price:    2 860.82 CZK/MWh (weighted by your consumption)
-                   2 510.70 CZK/MWh (simple average of the period)
+Avg spot price:    2 860.82 CZK/MWh (raw OTE, weighted by your consumption)
+                   2 510.70 CZK/MWh (raw OTE, simple average of the period)
+Spot + tariff:     3 689.94 CZK/MWh = 3.6899 CZK/kWh (weighted by your consumption)
+                   3 287.30 CZK/MWh = 3.2873 CZK/kWh (simple average of the period)
+                   (spot × 1.15 + 400 CZK/MWh; excl. VAT and fees)
+                   incl. VAT 21 %: 4.4648 / 3.9776 CZK/kWh
 Avg fixed price:   3 500.00 CZK/MWh = 3.5000 CZK/kWh (weighted by your consumption)
                    3 500.00 CZK/MWh = 3.5000 CZK/kWh (simple average of the period)
-                   (3.5 CZK/kWh + 150 CZK/month; excl. VAT and fees, like spot)
+                   (3.5 CZK/kWh + 150 CZK/month; excl. VAT and fees)
                    incl. VAT 21 %: 4.2350 / 4.2350 CZK/kWh
 At negative price: 3.523 kWh
 
@@ -99,11 +103,11 @@ Note: distribution charges (regulated EG.D fees, POZE, system services, ...) are
 the same for any supplier and are NOT included unless you enter them with
 --distribution-high / --distribution-low / --distribution-monthly-fee.
 
-Period       kWh  Spot avg  Fixed avg    Energy     Fee     Total  CZK/kWh     Fixed    Saved
----------------------------------------------------------------------------------------------
-2025-10  437.960  2 787.20   3 500.00  1 578.97  150.00  2 092.05   4.7768  2 036.26   -55.79
-2025-11  427.147  2 936.31   3 500.00  1 613.23  150.00  2 133.51   4.9948  1 990.47  -143.04
-(Spot avg and Fixed avg in CZK/MWh excl. VAT, consumption-weighted; money in CZK; Energy and Fee excl. VAT; Total, Fixed and Saved incl. VAT)
+Period       kWh  Spot avg  Spot+tariff  Fixed avg    Energy     Fee     Total  CZK/kWh     Fixed    Saved
+----------------------------------------------------------------------------------------------------------
+2025-10  437.960  2 787.20     3 605.27   3 500.00  1 578.97  150.00  2 092.05   4.7768  2 036.26   -55.79
+2025-11  427.147  2 936.31     3 776.75   3 500.00  1 613.23  150.00  2 133.51   4.9948  1 990.47  -143.04
+(Spot avg, Spot+tariff and Fixed avg in CZK/MWh excl. VAT, consumption-weighted; money in CZK; Energy and Fee excl. VAT; Total, Fixed and Saved incl. VAT)
 ```
 
 (`examples/sample_consumption.csv` je syntetický, ceny jsou skutečné ceny OTE.)
@@ -289,6 +293,13 @@ efektivní cena = celkem / Σ E_i                       [Kč/kWh]
   nezadáte – viz [Distribuční poplatky](#distribuční-poplatky).
 * Výpis ukazuje i vaši **spotřebou váženou průměrnou spotovou cenu** vedle prostého průměru
   období – je-li vaše vyšší, spotřebováváte více, když je elektřina drahá.
+* Řádky `Avg spot price` jsou **surová cena OTE** (před koeficienty). Řádky
+  **`Spot + tariff`** ukazují cenu energie, kterou byste skutečně platili – se započtenou
+  přirážkou a násobkem včetně koeficientů a režimu pro záporné ceny, bez DPH a bez měsíčních
+  poplatků (s `--vat` navíc řádek s DPH). Vážený průměr = `Energy (spot)` / spotřeba,
+  prostý průměr = průměr tarifované ceny přes všechny intervaly období. Tyto řádky jsou
+  přímo srovnatelné s `Avg fixed price`. V rozpisu je sloupec `Spot+tariff`, v CSV/JSON pole
+  `avg_spot_tariff_czk_mwh` a v souhrnu JSON `avg_spot_tariff_time_weighted_czk_mwh`.
 * Je-li zadaná fixní cena, výpis ukáže stejně i **průměrnou fixní cenu** – váženou vaší
   spotřebou a prostý průměr období (v CZK/MWh i CZK/kWh, bez DPH a bez měsíčních poplatků
   jako spotové průměry; s `--vat` navíc řádek s DPH). S jedinou cenou jsou oba průměry

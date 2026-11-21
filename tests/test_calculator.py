@@ -224,3 +224,46 @@ def test_fixed_weighted_and_simple_average():
     assert none.total.avg_fixed_czk_mwh is None
     assert "avg_fixed_czk_mwh" not in none.as_dict()["summary"]
     assert "avg_fixed_time_weighted_czk_mwh" not in none.as_dict()["summary"]
+
+
+def test_spot_tariff_weighted_and_simple_average():
+    from datetime import UTC, date, datetime, timedelta
+
+    from egd_api_client.models import PricePoint, Reading
+    from egd_api_client.spot.calculator import compute
+    from egd_api_client.spot.tariff import SpotTariff
+
+    q = timedelta(minutes=15)
+    t0 = datetime(2026, 1, 4, 23, 0, tzinfo=UTC)  # Mon 5.1.2026 00:00 local
+    # first half of the day at -100 CZK/MWh (3 kWh/quarter), second half 1000 (1 kWh/quarter)
+    readings = [Reading(t0 + i * q, 3.0 if i < 48 else 1.0) for i in range(96)]
+    prices = [PricePoint(t0 + i * q, q, -100.0 if i < 48 else 1000.0) for i in range(96)]
+    d = date(2026, 1, 5)
+
+    plain = compute(readings, prices, SpotTariff(add_czk_mwh=300), d, d, breakdown="day")
+    # linear tariff: weighted spot + 300
+    assert plain.total.avg_spot_tariff_czk_mwh == pytest.approx(plain.total.avg_spot_czk_mwh + 300)
+    assert plain.avg_spot_tariff_time_czk_mwh == pytest.approx(450 + 300)
+    assert plain.buckets[0].avg_spot_tariff_czk_mwh == pytest.approx(
+        plain.total.avg_spot_tariff_czk_mwh
+    )
+
+    # negative coefficients + clamp-total: -100 × 1.2 + 0 → -120 → floored at 0
+    t = SpotTariff(
+        multiplier=1.2,
+        add_czk_mwh=300,
+        negative_add_czk_mwh=0,
+        negative="clamp-total",
+        monthly_fee=100,
+        vat_percent=21,
+    )
+    res = compute(readings, prices, t, d, d)
+    # weighted: (144 kWh × 0 + 48 kWh × 1500) / 192 kWh; fees and VAT not included
+    assert res.total.avg_spot_tariff_czk_mwh == pytest.approx(48 * 1500 / 192)
+    assert res.total.avg_spot_tariff_czk_mwh == pytest.approx(
+        res.total.energy_czk * 1000 / res.total.kwh
+    )
+    assert res.avg_spot_tariff_time_czk_mwh == pytest.approx((0 + 1500) / 2)
+    s = res.as_dict()["summary"]
+    assert s["avg_spot_tariff_czk_mwh"] == pytest.approx(375)
+    assert s["avg_spot_tariff_time_weighted_czk_mwh"] == pytest.approx(750)

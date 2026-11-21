@@ -74,6 +74,12 @@ class Bucket:
         return self.spot_weighted_sum / self.kwh if self.kwh else None
 
     @property
+    def avg_spot_tariff_czk_mwh(self) -> float | None:
+        """Consumption-weighted average energy price actually paid (spot with tariff applied,
+        excl. VAT and fees) = energy cost / consumption."""
+        return self.energy_czk * 1000.0 / self.kwh if self.kwh else None
+
+    @property
     def avg_fixed_czk_mwh(self) -> float | None:
         """Consumption-weighted average fixed energy price (excl. VAT and fees)."""
         f = self.fixed_energy_czk
@@ -111,6 +117,7 @@ class Bucket:
             "period": self.label,
             "kwh": round(self.kwh, 3),
             "avg_spot_czk_mwh": _r(self.avg_spot_czk_mwh, 2),
+            "avg_spot_tariff_czk_mwh": _r(self.avg_spot_tariff_czk_mwh, 2),
             "energy_czk": round(self.energy_czk, 2),
             "fee_czk": round(self.fee_czk, 2),
             "vat_czk": round(self.vat_czk, 2),
@@ -159,6 +166,7 @@ class Result:
     low_tariff: str | None = None  # description of the NT schedule used
     distribution: DistributionTariff | None = None
     avg_fixed_time_czk_mwh: float | None = None  # simple average fixed price (VT/NT by time)
+    avg_spot_tariff_time_czk_mwh: float | None = None  # simple average of the tariffed price
 
     def as_dict(self) -> dict:
         return {
@@ -170,6 +178,7 @@ class Result:
             "summary": self.total.as_dict()
             | {
                 "avg_spot_time_weighted_czk_mwh": _r(self.avg_spot_time_czk_mwh, 2),
+                "avg_spot_tariff_time_weighted_czk_mwh": _r(self.avg_spot_tariff_time_czk_mwh, 2),
             }
             | (
                 {"avg_fixed_time_weighted_czk_mwh": _r(self.avg_fixed_time_czk_mwh, 2)}
@@ -344,15 +353,17 @@ def compute(
 
     # simple time-weighted average spot over the period (all slots that have a price)
     slot = t0
-    s = 0.0
+    s = s_tariff = 0.0
     n_slots = 0
     while slot < t1:
         p = lookup.at(slot)
         if p is not None:
             s += p.czk_mwh
+            s_tariff += tariff.energy_price_czk_mwh(p.czk_mwh)
             n_slots += 1
         slot += QUARTER
     avg_time = s / n_slots if n_slots else None
+    avg_tariff_time = s_tariff / n_slots if n_slots else None
 
     # simple (time-weighted) average fixed energy price over every slot of the period
     avg_fixed_time = None
@@ -385,4 +396,5 @@ def compute(
         low_tariff=low_tariff.describe() if low_tariff is not None else None,
         distribution=distribution,
         avg_fixed_time_czk_mwh=avg_fixed_time,
+        avg_spot_tariff_time_czk_mwh=avg_tariff_time,
     )
