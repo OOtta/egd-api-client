@@ -298,7 +298,8 @@ def test_calc_fixed_average_text_and_csv(mocked, tmp_path, capsys):
     text = capsys.readouterr().out
     assert "Avg fixed price:   4 000.00 CZK/MWh (weighted" in text
     assert "4 000.00 CZK/MWh (simple average" in text
-    assert "incl. VAT 21 %: 4 840.00 / 4 840.00 CZK/MWh" in text
+    assert "incl. VAT 21 %:" not in text
+    assert "VAT 21 %:" in text  # VAT total line stays
     assert "Fixed avg" in text
     assert "Spot+tariff" in text
     assert "(raw OTE, weighted by your consumption)" in text

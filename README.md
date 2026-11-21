@@ -83,11 +83,9 @@ Avg spot price:    2 860.82 CZK/MWh (raw OTE, weighted by your consumption)
 Spot + tariff:     3 689.94 CZK/MWh (weighted by your consumption)
                    3 287.30 CZK/MWh (simple average of the period)
                    (spot × 1.15 + 400 CZK/MWh; excl. VAT and fees)
-                   incl. VAT 21 %: 4 464.83 / 3 977.63 CZK/MWh
 Avg fixed price:   3 500.00 CZK/MWh (weighted by your consumption)
                    3 500.00 CZK/MWh (simple average of the period)
                    (3.5 CZK/kWh + 150 CZK/month; excl. VAT and fees)
-                   incl. VAT 21 %: 4 235.00 / 4 235.00 CZK/MWh
 At negative price: 3.523 kWh
 
 Energy (spot):     3 192.20 CZK
@@ -296,13 +294,13 @@ efektivní cena = celkem / Σ E_i                       [Kč/kWh]
 * Řádky `Avg spot price` jsou **surová cena OTE** (před koeficienty). Řádky
   **`Spot + tariff`** ukazují cenu energie, kterou byste skutečně platili – se započtenou
   přirážkou a násobkem včetně koeficientů a režimu pro záporné ceny, bez DPH a bez měsíčních
-  poplatků, v CZK/MWh (s `--vat` navíc řádek s DPH). Vážený průměr = `Energy (spot)` / spotřeba,
+  poplatků, v CZK/MWh. Vážený průměr = `Energy (spot)` / spotřeba,
   prostý průměr = průměr tarifované ceny přes všechny intervaly období. Tyto řádky jsou
   přímo srovnatelné s `Avg fixed price`. V rozpisu je sloupec `Spot+tariff`, v CSV/JSON pole
   `avg_spot_tariff_czk_mwh` a v souhrnu JSON `avg_spot_tariff_time_weighted_czk_mwh`.
 * Je-li zadaná fixní cena, výpis ukáže stejně i **průměrnou fixní cenu** – váženou vaší
   spotřebou a prostý průměr období (v CZK/MWh, bez DPH a bez měsíčních poplatků
-  jako spotové průměry; s `--vat` navíc řádek s DPH). S jedinou cenou jsou oba průměry
+  jako spotové průměry). S jedinou cenou jsou oba průměry
   rovny `--fixed-price`; s `--fixed-price-low` se liší – prostý průměr váží ceny VT/NT
   délkou oken (hodinami), vážený vaší spotřebou v NT a VT. V měsíčním/denním rozpisu je
   sloupec `Fixed avg` (vážený), v CSV/JSON pole `avg_fixed_czk_mwh` a v souhrnu JSON

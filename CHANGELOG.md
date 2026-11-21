@@ -41,7 +41,7 @@ First version, published as **egd-api-client** (command `egd`).
   `avg_spot_tariff_time_weighted_czk_mwh` in CSV/JSON. Raw OTE averages are labelled as such.
 - `egd spot calc` shows the average fixed price next to the average spot price when a
   fixed tariff is given: consumption-weighted and simple (time) average in CZK/MWh,
-  excl. VAT and fees (plus an incl.-VAT line with `--vat`); `Fixed avg` column in
+  excl. VAT and fees; `Fixed avg` column in
   the breakdown, `avg_fixed_czk_mwh` / `avg_fixed_time_weighted_czk_mwh` in CSV/JSON.
 - Documentation in Czech (`README.md`).
 - Windows: console output with Czech characters (e.g. `ČNB`) no longer fails on a

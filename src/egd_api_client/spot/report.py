@@ -39,15 +39,6 @@ def render_summary(res: Result, out: TextIO) -> None:
         "(raw OTE, simple average of the period)\n"
     )
 
-    vat = res.tariff.vat_percent
-
-    def vat_line(a: float | None, b: float | None) -> None:
-        if vat:
-            f = res.tariff.vat_factor
-            av = None if a is None else a * f
-            bv = None if b is None else b * f
-            w(f"                   incl. VAT {vat:g} %: {fmt(av)} / {fmt(bv)} CZK/MWh\n")
-
     ws, ss = t.avg_spot_tariff_czk_mwh, res.avg_spot_tariff_time_czk_mwh
     w(f"Spot + tariff:     {fmt(ws)} CZK/MWh (weighted by your consumption)\n")
     w(f"                   {fmt(ss)} CZK/MWh (simple average of the period)\n")
@@ -58,13 +49,11 @@ def render_summary(res: Result, out: TextIO) -> None:
     if res.tariff.negative != "as-is":
         formula += f", {res.tariff.negative}"
     w(f"                   ({formula}; excl. VAT and fees)\n")
-    vat_line(ws, ss)
     if res.fixed is not None:
         wf, sf = t.avg_fixed_czk_mwh, res.avg_fixed_time_czk_mwh
         w(f"Avg fixed price:   {fmt(wf)} CZK/MWh (weighted by your consumption)\n")
         w(f"                   {fmt(sf)} CZK/MWh (simple average of the period)\n")
         w(f"                   ({res.fixed.describe()}; excl. VAT and fees)\n")
-        vat_line(wf, sf)
     if t.negative_kwh:
         w(f"At negative price: {fmt(t.negative_kwh, 3)} kWh\n")
     if t.low_kwh is not None:
