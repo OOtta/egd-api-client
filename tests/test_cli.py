@@ -296,13 +296,14 @@ def test_calc_fixed_average_text_and_csv(mocked, tmp_path, capsys):
     argv += ["--fixed-price", "4", "-o", str(out_csv)]
     assert main(argv) == 0
     text = capsys.readouterr().out
-    assert "Avg fixed price:   4 000.00 CZK/MWh = 4.0000 CZK/kWh (weighted" in text
-    assert "4 000.00 CZK/MWh = 4.0000 CZK/kWh (simple average" in text
-    assert "incl. VAT 21 %: 4.8400 / 4.8400 CZK/kWh" in text
+    assert "Avg fixed price:   4 000.00 CZK/MWh (weighted" in text
+    assert "4 000.00 CZK/MWh (simple average" in text
+    assert "incl. VAT 21 %: 4 840.00 / 4 840.00 CZK/MWh" in text
     assert "Fixed avg" in text
     assert "Spot+tariff" in text
     assert "(raw OTE, weighted by your consumption)" in text
     assert "Spot + tariff:" in text and "(simple average of the period)" in text
+    assert "= " not in text.split("Spot + tariff:")[1].split("At negative")[0]
     rows = out_csv.read_text(encoding="utf-8").splitlines()
     assert "avg_fixed_czk_mwh" in rows[0].split(",")
     assert "avg_spot_tariff_czk_mwh" in rows[0].split(",")

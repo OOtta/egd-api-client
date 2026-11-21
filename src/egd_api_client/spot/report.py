@@ -39,9 +39,6 @@ def render_summary(res: Result, out: TextIO) -> None:
         "(raw OTE, simple average of the period)\n"
     )
 
-    def kwh(v: float | None) -> str:
-        return fmt(None if v is None else v / 1000.0, 4)
-
     vat = res.tariff.vat_percent
 
     def vat_line(a: float | None, b: float | None) -> None:
@@ -49,11 +46,11 @@ def render_summary(res: Result, out: TextIO) -> None:
             f = res.tariff.vat_factor
             av = None if a is None else a * f
             bv = None if b is None else b * f
-            w(f"                   incl. VAT {vat:g} %: {kwh(av)} / {kwh(bv)} CZK/kWh\n")
+            w(f"                   incl. VAT {vat:g} %: {fmt(av)} / {fmt(bv)} CZK/MWh\n")
 
     ws, ss = t.avg_spot_tariff_czk_mwh, res.avg_spot_tariff_time_czk_mwh
-    w(f"Spot + tariff:     {fmt(ws)} CZK/MWh = {kwh(ws)} CZK/kWh (weighted by your consumption)\n")
-    w(f"                   {fmt(ss)} CZK/MWh = {kwh(ss)} CZK/kWh (simple average of the period)\n")
+    w(f"Spot + tariff:     {fmt(ws)} CZK/MWh (weighted by your consumption)\n")
+    w(f"                   {fmt(ss)} CZK/MWh (simple average of the period)\n")
     formula = res.tariff._formula(res.tariff.multiplier, res.tariff.add_czk_mwh)
     if res.tariff.has_negative_coefficients:
         neg = res.tariff._formula(*res.tariff.coefficients(-1.0))
@@ -64,14 +61,8 @@ def render_summary(res: Result, out: TextIO) -> None:
     vat_line(ws, ss)
     if res.fixed is not None:
         wf, sf = t.avg_fixed_czk_mwh, res.avg_fixed_time_czk_mwh
-        w(
-            f"Avg fixed price:   {fmt(wf)} CZK/MWh = {kwh(wf)} CZK/kWh "
-            "(weighted by your consumption)\n"
-        )
-        w(
-            f"                   {fmt(sf)} CZK/MWh = {kwh(sf)} CZK/kWh "
-            "(simple average of the period)\n"
-        )
+        w(f"Avg fixed price:   {fmt(wf)} CZK/MWh (weighted by your consumption)\n")
+        w(f"                   {fmt(sf)} CZK/MWh (simple average of the period)\n")
         w(f"                   ({res.fixed.describe()}; excl. VAT and fees)\n")
         vat_line(wf, sf)
     if t.negative_kwh:

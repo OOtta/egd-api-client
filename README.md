@@ -80,14 +80,14 @@ Data coverage:     5860/5860 quarter-hours (100.0 %)
 Consumption:       865.107 kWh
 Avg spot price:    2 860.82 CZK/MWh (raw OTE, weighted by your consumption)
                    2 510.70 CZK/MWh (raw OTE, simple average of the period)
-Spot + tariff:     3 689.94 CZK/MWh = 3.6899 CZK/kWh (weighted by your consumption)
-                   3 287.30 CZK/MWh = 3.2873 CZK/kWh (simple average of the period)
+Spot + tariff:     3 689.94 CZK/MWh (weighted by your consumption)
+                   3 287.30 CZK/MWh (simple average of the period)
                    (spot × 1.15 + 400 CZK/MWh; excl. VAT and fees)
-                   incl. VAT 21 %: 4.4648 / 3.9776 CZK/kWh
-Avg fixed price:   3 500.00 CZK/MWh = 3.5000 CZK/kWh (weighted by your consumption)
-                   3 500.00 CZK/MWh = 3.5000 CZK/kWh (simple average of the period)
+                   incl. VAT 21 %: 4 464.83 / 3 977.63 CZK/MWh
+Avg fixed price:   3 500.00 CZK/MWh (weighted by your consumption)
+                   3 500.00 CZK/MWh (simple average of the period)
                    (3.5 CZK/kWh + 150 CZK/month; excl. VAT and fees)
-                   incl. VAT 21 %: 4.2350 / 4.2350 CZK/kWh
+                   incl. VAT 21 %: 4 235.00 / 4 235.00 CZK/MWh
 At negative price: 3.523 kWh
 
 Energy (spot):     3 192.20 CZK
@@ -296,12 +296,12 @@ efektivní cena = celkem / Σ E_i                       [Kč/kWh]
 * Řádky `Avg spot price` jsou **surová cena OTE** (před koeficienty). Řádky
   **`Spot + tariff`** ukazují cenu energie, kterou byste skutečně platili – se započtenou
   přirážkou a násobkem včetně koeficientů a režimu pro záporné ceny, bez DPH a bez měsíčních
-  poplatků (s `--vat` navíc řádek s DPH). Vážený průměr = `Energy (spot)` / spotřeba,
+  poplatků, v CZK/MWh (s `--vat` navíc řádek s DPH). Vážený průměr = `Energy (spot)` / spotřeba,
   prostý průměr = průměr tarifované ceny přes všechny intervaly období. Tyto řádky jsou
   přímo srovnatelné s `Avg fixed price`. V rozpisu je sloupec `Spot+tariff`, v CSV/JSON pole
   `avg_spot_tariff_czk_mwh` a v souhrnu JSON `avg_spot_tariff_time_weighted_czk_mwh`.
 * Je-li zadaná fixní cena, výpis ukáže stejně i **průměrnou fixní cenu** – váženou vaší
-  spotřebou a prostý průměr období (v CZK/MWh i CZK/kWh, bez DPH a bez měsíčních poplatků
+  spotřebou a prostý průměr období (v CZK/MWh, bez DPH a bez měsíčních poplatků
   jako spotové průměry; s `--vat` navíc řádek s DPH). S jedinou cenou jsou oba průměry
   rovny `--fixed-price`; s `--fixed-price-low` se liší – prostý průměr váží ceny VT/NT
   délkou oken (hodinami), vážený vaší spotřebou v NT a VT. V měsíčním/denním rozpisu je

@@ -35,13 +35,13 @@ First version, published as **egd-api-client** (command `egd`).
   `Fixed + distrib.`, breakdown and export columns. EG.D's OpenAPI provides no distribution
   rate, breaker or fee data and no price tables are built in.
 - `egd spot calc` shows the average spot price with the tariff applied (`Spot + tariff`:
-  coefficients incl. negative-price handling, excl. VAT and fees; weighted = energy cost /
+  coefficients incl. negative-price handling, CZK/MWh excl. VAT and fees; weighted = energy cost /
   consumption, plus the simple average of the period), directly comparable with the fixed
   price; `Spot+tariff` column, `avg_spot_tariff_czk_mwh` /
   `avg_spot_tariff_time_weighted_czk_mwh` in CSV/JSON. Raw OTE averages are labelled as such.
 - `egd spot calc` shows the average fixed price next to the average spot price when a
-  fixed tariff is given: consumption-weighted and simple (time) average, CZK/MWh and
-  CZK/kWh, excl. VAT and fees (plus an incl.-VAT line with `--vat`); `Fixed avg` column in
+  fixed tariff is given: consumption-weighted and simple (time) average in CZK/MWh,
+  excl. VAT and fees (plus an incl.-VAT line with `--vat`); `Fixed avg` column in
   the breakdown, `avg_fixed_czk_mwh` / `avg_fixed_time_weighted_czk_mwh` in CSV/JSON.
 - Documentation in Czech (`README.md`).
 - Windows: console output with Czech characters (e.g. `ČNB`) no longer fails on a
