@@ -20,7 +20,7 @@ with it. The first feature built on top of the client is the **spot-tariff calcu
 The same functionality is available as a library (`egd_api_client.EgdClient`,
 `egd_api_client.spot`), so more features can be added as further sub-commands.
 
-> 🇨🇿 Česky: viz [níže](#česky).
+> 🇨🇿 Česky: [README.cs.md](README.cs.md)
 
 ## Contents
 
@@ -38,7 +38,7 @@ The same functionality is available as a library (`egd_api_client.EgdClient`,
 - [Input files](#input-files)
 - [Limitations](#limitations)
 - [Development](#development)
-- [Česky](#česky)
+- [License](#license)
 
 ## Installation
 
@@ -129,8 +129,9 @@ Settings are read from (later wins):
 2. environment variables `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`;
 3. command-line options.
 
-The file has an `[egd]` section (credentials, EAN, API options) and one section per feature
-(`[spot]`, `[spot.fixed]`); see [`examples/config.example.toml`](examples/config.example.toml).
+The file has an `[egd]` section (credentials, EAN, API options), `[spot]` (spot formula),
+`[spot.fixed]` (fixed comparison tariff), `[low_tariff]` (NT hours) and `[distribution]`
+(distribution charges); see [`examples/config.example.toml`](examples/config.example.toml).
 If you store the secret in the file, `chmod 600` it – the tool warns otherwise. Secrets are
 never printed or cached; the daily access token is kept in memory only.
 
@@ -447,7 +448,7 @@ src/egd_api_client/
     ote.py           OTE day-ahead prices (SOAP) with caching
     cnb.py           ČNB EUR/CZK rates
     calculator.py    cost computation and aggregation
-    tariff.py        spot / fixed tariff definitions
+    tariff.py        spot / fixed / distribution tariff definitions
     report.py        text report and CSV/JSON export
 tests/               pytest suite with recorded OTE/ČNB fixtures
 ```
@@ -458,72 +459,3 @@ New features go into their own subpackage with a `register(subparsers, …)` fun
 ## License
 
 [MIT](LICENSE). Not affiliated with EG.D, OTE or ČNB.
-
----
-
-## Česky
-
-`egd-api-client` je klient a příkazová řádka pro **OpenAPI EG.D (Distribuce24)**. Umí
-stáhnout čtvrthodinová data ze smartmetru – spotřebu i výrobu (přetoky) – do CSV/JSON
-(`egd data`) a jako první funkci nad nimi spočítat, kolik byste zaplatili za elektřinu se
-**spotovým tarifem** (`egd spot calc`). Spotové ceny si sám stáhne z **OTE** (denní trh; do
-30. 9. 2025 hodinové v CZK, od 1. 10. 2025 čtvrthodinové v EUR přepočtené **kurzem ČNB
-platným pro daný den dodávky** – o víkendu a ve svátek posledním vyhlášeným, stejně jako to
-dělá OTE) a použije vzorec vašeho dodavatele:
-
-```
-cena = spot × koeficient + přirážka [Kč/MWh]   (+ měsíční poplatek, + DPH)
-```
-
-| Příkaz | Co dělá |
-|---|---|
-| `egd meters` | seznam odběrných míst (EAN) dostupných pro vaše přihlašovací údaje |
-| `egd data` | export čtvrthodinové spotřeby (`--kind consumption`) nebo výroby (`--kind production`) |
-| `egd spot calc` | výpočet ceny se spotovým tarifem |
-| `egd spot prices --currency czk\|eur` | spotové ceny OTE v CZK nebo EUR (měnu je nutné zvolit), export `-o .csv/.json` |
-| `egd spot fx` | kurz EUR/CZK použitý pro každý den, export `-o .csv/.json` |
-
-Příklad – dodavatel účtuje `spot × 1,15 + 400 Kč/MWh`, 99 Kč měsíčně, s DPH 21 %, porovnání
-s fixní cenou 3,20 Kč/kWh:
-
-```bash
-export EGD_CLIENT_ID=...  EGD_CLIENT_SECRET=...
-egd spot calc --ean 859182400xxxxxxxxx --from 2025-01 --to 2025-12 \
-    -m 1.15 -a 400 --monthly-fee 99 --vat --fixed-price 3.2 --breakdown month
-```
-
-Konfigurace: `~/.config/egd-api-client/config.toml` (sekce `[egd]`, `[spot]`, `[spot.fixed]`,
-`[low_tariff]`, `[distribution]`),
-proměnné prostředí `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`.
-
-**Přístup k API:** na [portal.distribuce24.cz](https://portal.distribuce24.cz) →
-*Správa účtů → Vzdálený přístup – OpenAPI* → *Vygenerovat client_id a client_secret*.
-Funguje pro odběrná místa s měřením A, B a C1 (aktivní chytrý elektroměr). Bez API můžete
-použít export z portálu: `egd spot calc --input export.xlsx ...`.
-
-**Záporné ceny:** pro období se záporným spotem lze zadat vlastní násobek a přirážku
-(`--negative-multiplier`, `--negative-add-czk-mwh`); co není zadáno, převezme se z `-m` / `-a`.
-Pak `--negative as-is` (výchozí, vzorec beze změny – záporná cena snižuje účet),
-`clamp-spot` (záporný spot se nejdřív nahradí nulou, platí se tedy jen přirážka pro záporné
-ceny), `clamp-total` (výsledná cena nikdy pod 0).
-
-**Fixní cena VT/NT:** `--fixed-price` (VT) a `--fixed-price-low` (NT). API EG.D časy NT
-neposkytuje (ani sazbu, HDO, jistič), proto je vždy zadáváte sami:
-`--low-tariff-hours "22:00-06:00,13:00-15:00"`, případně `--low-tariff-hours-weekend` pro
-sobotu a neděli a `--holidays weekday|sunday` (svátky podle dne v týdnu, nebo jako víkend);
-nebo v konfiguraci `[low_tariff]`. Bez zadaných časů NT výpočet s `--fixed-price-low`
-skončí chybou, nic se nedopočítává automaticky.
-
-**Poplatky distributora:** API EG.D je neposkytuje a program nemá zabudované žádné ceníky –
-zadáte je sami (Kč bez DPH): `--distribution-high` (Kč/kWh ve VT, bez NT ceny pro veškerou
-spotřebu), `--distribution-low` (Kč/kWh v NT, vyžaduje `--low-tariff-hours`, jinak chyba),
-`--distribution-monthly-fee` (měsíční platby, např. za jistič); v konfiguraci sekce
-`[distribution]` (`high_czk_kwh`, `low_czk_kwh`, `monthly_fee`). Přičtou se ke spotovému
-i fixnímu výsledku (s DPH při `--vat`) – výpis ukazuje `Spot + distrib.` a `Fixed + distrib.`,
-rozpis a exporty sloupce s distribucí.
-
-**Nezahrnuto bez zadání:** regulované platby za distribuci (distribuční poplatek, jistič,
-systémové služby, POZE, daň z elektřiny) – jsou stejné u každého dodavatele; viz výše.
-
-Výsledek je odhad, ne faktura – dodavatelé se liší v kurzu, zaokrouhlování a dalších
-poplatcích.

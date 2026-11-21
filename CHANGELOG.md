@@ -34,6 +34,7 @@ First version, published as **egd-api-client** (command `egd`).
   `--distribution-monthly-fee`, config `[distribution]`; report lines `Spot + distrib.` /
   `Fixed + distrib.`, breakdown and export columns. EG.D's OpenAPI provides no distribution
   rate, breaker or fee data and no price tables are built in.
+- Full Czech documentation in `README.cs.md` (linked from `README.md`).
 - CSV/XLSX consumption import with column, unit, timestamp-convention and DST detection.
 - Config file `~/.config/egd-api-client/config.toml` with `[egd]`, `[spot]`, `[spot.fixed]`
   sections; environment variables `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`,
