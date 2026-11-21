@@ -37,6 +37,9 @@ First version, published as **egd-api-client** (command `egd`).
 - Documentation in Czech (`README.md`).
 - Windows: console output with Czech characters (e.g. `ČNB`) no longer fails on a
   redirected/piped cp1252 stdout – such streams are switched to UTF-8.
+- `tzdata` is now an unconditional dependency, so `egd` works where the OS has no
+  time-zone database (Termux/Android, minimal containers), with a clear hint if the zone
+  still cannot be loaded; Python 3.14 added to CI and classifiers.
 - CSV/XLSX consumption import with column, unit, timestamp-convention and DST detection.
 - Config file `~/.config/egd-api-client/config.toml` with `[egd]`, `[spot]`, `[spot.fixed]`
   sections; environment variables `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`,

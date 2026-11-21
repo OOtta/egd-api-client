@@ -7,9 +7,25 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-PRAGUE = ZoneInfo("Europe/Prague")
+TZ_HINT = (
+    "Install the time-zone database: `pip install tzdata` "
+    "(pipx: `pipx inject egd-api-client tzdata`)."
+)
+
+
+def load_zone(key: str = "Europe/Prague") -> ZoneInfo:
+    """Load a time zone, with an actionable message when no tz database is available."""
+    try:
+        return ZoneInfo(key)
+    except ZoneInfoNotFoundError as exc:
+        raise ZoneInfoNotFoundError(
+            f"Time zone {key!r} not found: this system has no time-zone database. {TZ_HINT}"
+        ) from exc
+
+
+PRAGUE = load_zone("Europe/Prague")
 QUARTER = timedelta(minutes=15)
 HOUR = timedelta(hours=1)
 

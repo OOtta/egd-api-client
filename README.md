@@ -34,6 +34,7 @@ Stejné funkce jsou k dispozici jako knihovna (`egd_api_client.EgdClient`,
 - [Zdroje dat](#zdroje-dat)
 - [Vstupní soubory](#vstupní-soubory)
 - [Omezení](#omezení)
+- [Řešení problémů](#řešení-problémů)
 - [Vývoj](#vývoj)
 - [Licence](#licence)
 
@@ -425,6 +426,17 @@ Místní časy v opakované hodině na konci letního času se rozliší podle p
 * Výrobu / přetoky do sítě lze stáhnout přes `egd data --kind production`, ale výkupní ceny
   `egd spot calc` zatím nemodeluje.
 * Časy NT a distribuční poplatky API neposkytuje – zadáváte je ručně.
+
+## Řešení problémů
+
+**`ZoneInfoNotFoundError: 'No time zone found with key Europe/Prague'`** (Termux/Android,
+Windows, minimalistické kontejnery) – systém nemá databázi časových pásem. Nové verze
+instalují balíček `tzdata` automaticky. Starší instalaci opravíte jedním z příkazů:
+
+```bash
+pipx install --force "git+https://github.com/OOtta/egd-api-client"   # přeinstalace
+pipx inject egd-api-client tzdata                                     # jen doplnit tzdata
+```
 
 ## Vývoj
 
