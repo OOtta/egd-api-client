@@ -35,6 +35,27 @@ def render_summary(res: Result, out: TextIO) -> None:
         f"                   {fmt(res.avg_spot_time_czk_mwh)} CZK/MWh "
         "(simple average of the period)\n"
     )
+    if res.fixed is not None:
+        wf, sf = t.avg_fixed_czk_mwh, res.avg_fixed_time_czk_mwh
+
+        def kwh(v: float | None) -> str:
+            return fmt(None if v is None else v / 1000.0, 4)
+
+        w(
+            f"Avg fixed price:   {fmt(wf)} CZK/MWh = {kwh(wf)} CZK/kWh "
+            "(weighted by your consumption)\n"
+        )
+        w(
+            f"                   {fmt(sf)} CZK/MWh = {kwh(sf)} CZK/kWh "
+            "(simple average of the period)\n"
+        )
+        w(f"                   ({res.fixed.describe()}; excl. VAT and fees, like spot)\n")
+        vat = res.tariff.vat_percent
+        if vat:
+            f = res.tariff.vat_factor
+            wv = None if wf is None else wf * f
+            sv = None if sf is None else sf * f
+            w(f"                   incl. VAT {vat:g} %: {kwh(wv)} / {kwh(sv)} CZK/kWh\n")
     if t.negative_kwh:
         w(f"At negative price: {fmt(t.negative_kwh, 3)} kWh\n")
     if t.low_kwh is not None:
@@ -91,7 +112,9 @@ def render_breakdown(res: Result, out: TextIO) -> None:
     cols = (
         ["Period", "kWh"]
         + (["NT kWh"] if low else [])
-        + ["Spot avg", "Energy", "Fee", "Total", "CZK/kWh"]
+        + ["Spot avg"]
+        + (["Fixed avg"] if fixed else [])
+        + ["Energy", "Fee", "Total", "CZK/kWh"]
     )
     dist = res.total.distribution_czk is not None
     if dist:
@@ -105,8 +128,9 @@ def render_breakdown(res: Result, out: TextIO) -> None:
         row = (
             [b.label, fmt(b.kwh, 3)]
             + ([fmt(b.low_kwh, 3)] if low else [])
+            + [fmt(b.avg_spot_czk_mwh)]
+            + ([fmt(b.avg_fixed_czk_mwh)] if fixed else [])
             + [
-                fmt(b.avg_spot_czk_mwh),
                 fmt(b.energy_czk),
                 fmt(b.fee_czk),
                 fmt(b.total_czk),
@@ -137,7 +161,8 @@ def render_breakdown(res: Result, out: TextIO) -> None:
     vat_note = (
         f"{excl} excl. VAT; {incl} incl. VAT" if res.tariff.vat_percent else "all amounts excl. VAT"
     )
-    out.write(f"(Spot avg in CZK/MWh, consumption-weighted; money in CZK; {vat_note})\n")
+    avg = "Spot avg and Fixed avg" if fixed else "Spot avg"
+    out.write(f"({avg} in CZK/MWh excl. VAT, consumption-weighted; money in CZK; {vat_note})\n")
 
 
 def export_result(res: Result, path: Path) -> None:

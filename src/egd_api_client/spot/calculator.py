@@ -42,6 +42,7 @@ class Bucket:
     spot_weighted_sum: float = 0.0  # Σ kWh × spot CZK/MWh
     negative_kwh: float = 0.0
     fixed_czk: float | None = None  # comparison tariff incl. fee, excl. VAT
+    fixed_energy_czk: float | None = None  # comparison tariff energy only, excl. VAT
     low_kwh: float | None = None  # consumption in low-tariff (NT) periods, if known
     distribution_czk: float | None = None  # user-supplied distribution charges, excl. VAT
     vat_factor: float = 1.0
@@ -71,6 +72,12 @@ class Bucket:
     def avg_spot_czk_mwh(self) -> float | None:
         """Consumption-weighted average spot price."""
         return self.spot_weighted_sum / self.kwh if self.kwh else None
+
+    @property
+    def avg_fixed_czk_mwh(self) -> float | None:
+        """Consumption-weighted average fixed energy price (excl. VAT and fees)."""
+        f = self.fixed_energy_czk
+        return None if f is None or not self.kwh else f * 1000.0 / self.kwh
 
     @property
     def fixed_total_czk(self) -> float | None:
@@ -121,6 +128,7 @@ class Bucket:
                 r,  # type: ignore[operator]
             )
         if self.fixed_czk is not None:
+            out["avg_fixed_czk_mwh"] = _r(self.avg_fixed_czk_mwh, 2)
             out["fixed_total_czk"] = _r(self.fixed_total_czk, 2)
             out["savings_czk"] = _r(self.savings_czk, 2)
             if self.distribution_czk is not None:
@@ -150,6 +158,7 @@ class Result:
     warnings: list[str] = field(default_factory=list)
     low_tariff: str | None = None  # description of the NT schedule used
     distribution: DistributionTariff | None = None
+    avg_fixed_time_czk_mwh: float | None = None  # simple average fixed price (VT/NT by time)
 
     def as_dict(self) -> dict:
         return {
@@ -161,6 +170,13 @@ class Result:
             "summary": self.total.as_dict()
             | {
                 "avg_spot_time_weighted_czk_mwh": _r(self.avg_spot_time_czk_mwh, 2),
+            }
+            | (
+                {"avg_fixed_time_weighted_czk_mwh": _r(self.avg_fixed_time_czk_mwh, 2)}
+                if self.fixed is not None
+                else {}
+            )
+            | {
                 "expected_quarter_hours": self.expected_intervals,
                 "covered_quarter_hours": self.covered_intervals,
                 "missing_price_kwh": round(self.missing_price_kwh, 3),
@@ -282,6 +298,7 @@ def compute(
                 b.low_kwh = (b.low_kwh or 0.0) + low
             if fixed is not None:
                 b.fixed_czk = (b.fixed_czk or 0.0) + fixed_cost
+                b.fixed_energy_czk = (b.fixed_energy_czk or 0.0) + fixed_cost
             if distribution is not None:
                 b.distribution_czk = (b.distribution_czk or 0.0) + dist_cost
 
@@ -337,6 +354,21 @@ def compute(
         slot += QUARTER
     avg_time = s / n_slots if n_slots else None
 
+    # simple (time-weighted) average fixed energy price over every slot of the period
+    avg_fixed_time = None
+    if fixed is not None:
+        hi, nt = fixed.price_czk_kwh, fixed.price_low_czk_kwh
+        if nt is None or low_tariff is None:
+            avg_fixed_time = hi * 1000.0
+        else:
+            slot, s, n_slots = t0, 0.0, 0
+            while slot < t1:
+                frac = low_tariff.low_fraction(slot, QUARTER)
+                s += nt * frac + hi * (1 - frac)
+                n_slots += 1
+                slot += QUARTER
+            avg_fixed_time = s / n_slots * 1000.0 if n_slots else None
+
     return Result(
         start=start,
         end=end,
@@ -352,4 +384,5 @@ def compute(
         warnings=warnings,
         low_tariff=low_tariff.describe() if low_tariff is not None else None,
         distribution=distribution,
+        avg_fixed_time_czk_mwh=avg_fixed_time,
     )

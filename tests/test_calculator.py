@@ -185,3 +185,42 @@ def test_distribution_vt_nt_split_needs_schedule():
     assert res.total.total_with_distribution_czk == pytest.approx(96 + 144)
     with pytest.raises(ValueError, match="distribution"):
         compute(readings, prices, SpotTariff(), d, d, distribution=dist)
+
+
+def test_fixed_weighted_and_simple_average():
+    from datetime import UTC, date, datetime, timedelta
+
+    from egd_api_client.lowtariff import LowTariffSchedule
+    from egd_api_client.models import PricePoint, Reading
+    from egd_api_client.spot.calculator import compute
+    from egd_api_client.spot.tariff import FixedTariff, SpotTariff
+
+    q = timedelta(minutes=15)
+    t0 = datetime(2026, 1, 4, 23, 0, tzinfo=UTC)  # Mon 5.1.2026 00:00 local
+    # 3 kWh per quarter in NT (00:00-06:00), 1 kWh otherwise
+    readings = [Reading(t0 + i * q, 3.0 if i < 24 else 1.0) for i in range(96)]
+    prices = [PricePoint(t0 + i * q, q, 1000.0) for i in range(96)]
+    sched = LowTariffSchedule.parse("00:00-06:00")
+    d = date(2026, 1, 5)
+    fixed = FixedTariff(4.0, 50.0, 2.0)  # monthly fee must not affect the averages
+    res = compute(
+        readings, prices, SpotTariff(), d, d, fixed=fixed, low_tariff=sched, breakdown="day"
+    )
+    # weighted: (72 kWh × 2 + 72 kWh × 4) / 144 kWh = 3 CZK/kWh
+    assert res.total.avg_fixed_czk_mwh == pytest.approx(3000)
+    assert res.buckets[0].avg_fixed_czk_mwh == pytest.approx(3000)
+    # simple: 6 h × 2 + 18 h × 4 over 24 h = 3.5 CZK/kWh
+    assert res.avg_fixed_time_czk_mwh == pytest.approx(3500)
+    s = res.as_dict()["summary"]
+    assert s["avg_fixed_czk_mwh"] == pytest.approx(3000)
+    assert s["avg_fixed_time_weighted_czk_mwh"] == pytest.approx(3500)
+    assert res.as_dict()["breakdown"][0]["avg_fixed_czk_mwh"] == pytest.approx(3000)
+
+    single = compute(readings, prices, SpotTariff(), d, d, fixed=FixedTariff(4.0))
+    assert single.total.avg_fixed_czk_mwh == pytest.approx(4000)
+    assert single.avg_fixed_time_czk_mwh == pytest.approx(4000)
+
+    none = compute(readings, prices, SpotTariff(), d, d)
+    assert none.total.avg_fixed_czk_mwh is None
+    assert "avg_fixed_czk_mwh" not in none.as_dict()["summary"]
+    assert "avg_fixed_time_weighted_czk_mwh" not in none.as_dict()["summary"]

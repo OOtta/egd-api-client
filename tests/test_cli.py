@@ -281,6 +281,29 @@ def test_calc_fixed_vt_nt_with_manual_hours(mocked, tmp_path, capsys):
     assert data["summary"]["low_tariff_kwh"] == pytest.approx(16)
     assert data["summary"]["fixed_total_czk"] == pytest.approx(16 * 2 + 32 * 4)
     assert "NT 00:00–06:00, 22:00–24:00" in data["low_tariff_schedule"]
+    # weighted 160 CZK / 48 kWh; simple: 30.9. and 1.10. both 8 NT h of 24
+    assert data["summary"]["avg_fixed_czk_mwh"] == pytest.approx(160 / 48 * 1000, abs=0.01)
+    assert data["summary"]["avg_fixed_time_weighted_czk_mwh"] == pytest.approx(
+        (8 * 2 + 16 * 4) / 24 * 1000, abs=0.01
+    )
+
+
+def test_calc_fixed_average_text_and_csv(mocked, tmp_path, capsys):
+    add_cnb(mocked)
+    add_ote(mocked, FakeOte(lambda d, i: 1000.0 if d < date(2025, 10, 1) else 40.0))
+    out_csv = tmp_path / "b.csv"
+    argv = ["spot", "calc", "-i", str(sample_csv(tmp_path)), "-b", "month", "--vat"]
+    argv += ["--fixed-price", "4", "-o", str(out_csv)]
+    assert main(argv) == 0
+    text = capsys.readouterr().out
+    assert "Avg fixed price:   4 000.00 CZK/MWh = 4.0000 CZK/kWh (weighted" in text
+    assert "4 000.00 CZK/MWh = 4.0000 CZK/kWh (simple average" in text
+    assert "incl. VAT 21 %: 4.8400 / 4.8400 CZK/kWh" in text
+    assert "Fixed avg" in text
+    rows = out_csv.read_text(encoding="utf-8").splitlines()
+    assert "avg_fixed_czk_mwh" in rows[0].split(",")
+    assert main(["spot", "calc", "-i", str(sample_csv(tmp_path))]) == 0
+    assert "Avg fixed price" not in capsys.readouterr().out
 
 
 def test_calc_nt_price_needs_schedule(capsys, tmp_path):
