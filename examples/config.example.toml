@@ -32,13 +32,8 @@ price_czk_kwh = 3.20        # excl. VAT; the high-tariff (VT) price of a two-rat
 # price_low_czk_kwh = 2.40  # low-tariff (NT) price; needs [low_tariff] below
 monthly_fee = 120
 
-# Low-tariff (NT) periods – EG.D's API does not provide them. Either an HDO code/command
-# (from the HDO receiver or the meter display; EG.D public data) ...
+# Low-tariff (NT) hours – EG.D's API does not provide them; required for price_low_czk_kwh.
 [low_tariff]
-# hdo_code = "405"
-# psc = "37001"             # or hdo_region = "ZAPAD"; needed when the code is ambiguous
-# hdo_relay = "D25d"        # only if the code has several schedules (see `egd hdo`)
-# ... or explicit hours:
-# hours = "22:00-06:00,13:00-15:00"
-# hours_weekend = "00:00-08:00,12:00-20:00"
-# holidays = "auto"         # "sunday" | "weekday" | "auto"
+# hours = "22:00-06:00,13:00-15:00"        # every day (local time)
+# hours_weekend = "00:00-08:00,12:00-20:00" # optional, Saturday and Sunday
+# holidays = "weekday"                       # or "sunday": holidays use the weekend hours

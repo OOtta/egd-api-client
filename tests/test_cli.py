@@ -284,7 +284,7 @@ def test_calc_fixed_vt_nt_with_manual_hours(mocked, tmp_path, capsys):
 def test_calc_nt_price_needs_schedule(capsys, tmp_path):
     argv = ["spot", "calc", "-i", str(sample_csv(tmp_path)), "--fixed-price", "4"]
     assert main([*argv, "--fixed-price-low", "2"]) == 2
-    assert "NT periods" in capsys.readouterr().err
+    assert "--low-tariff-hours" in capsys.readouterr().err
     assert main(["spot", "calc", "-i", str(sample_csv(tmp_path)), "--fixed-price-low", "2"]) == 2
 
 
@@ -308,24 +308,9 @@ def test_calc_negative_coefficients(mocked, tmp_path, capsys):
     assert data["tariff"]["negative_multiplier"] == 1.0
 
 
-def test_hdo_command(mocked, capsys):
-    from egd_api_client.lowtariff import HDO_REGION_URL, HDO_TIMES_URL
-    from test_lowtariff import HDO, REGIONS
-
-    mocked.add(responses.GET, HDO_TIMES_URL, json=HDO)
-    mocked.add(responses.GET, HDO_REGION_URL, json=REGIONS)
-    assert main(["hdo", "--hdo-code", "405", "--psc", "37001"]) == 0
-    out = capsys.readouterr().out
-    assert "valid every year 01.10.–31.03." in out and "Sun  00:00–24:00" in out
-    argv = ["hdo", "--hdo-code", "Cd56", "--hdo-relay", "D56d-relé2-TUV", "--json"]
-    assert main([*argv, "--from", "2026-08-31", "--to", "2026-09-01"]) == 0
-    days = json.loads(capsys.readouterr().out)["days"]
-    assert days[0]["windows"] is None and days[1] == {
-        "day": "2026-09-01",
-        "windows": "02:00–04:00",
-        "nt_hours": 2.0,
-    }
-    assert main(["hdo", "--list", "--hdo-region", "SM"]) == 0
-    assert capsys.readouterr().out.strip() == "SM\tCd56"
-    assert main(["hdo", "--hdo-code", "405"]) == 2
-    assert "several regions" in capsys.readouterr().err
+def test_low_tariff_cli_errors(capsys, tmp_path):
+    base = ["spot", "calc", "-i", str(sample_csv(tmp_path)), "--fixed-price", "4"]
+    assert main([*base, "--fixed-price-low", "2", "--low-tariff-hours", "25:00-06:00"]) == 2
+    assert "low-tariff hours: invalid time" in capsys.readouterr().err
+    assert main([*base, "--low-tariff-hours-weekend", "00:00-24:00"]) == 2
+    assert "needs --low-tariff-hours" in capsys.readouterr().err

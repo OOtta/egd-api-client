@@ -9,26 +9,22 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date
 from pathlib import Path
 
 from egd_api_client import __version__
 from egd_api_client.cli_common import (
     CliError,
     Context,
-    build_low_tariff,
     clamp_to_yesterday,
     common_parser,
     egd_parser,
     info,
-    low_tariff_parser,
     period_parser,
     resolve_period,
     warn,
 )
 from egd_api_client.config import ConfigError
 from egd_api_client.http import FetchError
-from egd_api_client.lowtariff import HdoClient, format_windows
 from egd_api_client.readings_io import InputFormatError, write_canonical_csv, write_json
 from egd_api_client.spot import cli as spot_cli
 from egd_api_client.timeutil import local_date
@@ -42,7 +38,6 @@ examples:
   egd spot calc --input october.csv --add-czk-mwh 350 --fixed-price 3.2
   egd spot prices --from 2026-11 -o prices.csv
   egd spot fx --from 2026-10-24 --to 2026-11-02 -o fx.csv
-  egd hdo --hdo-code 405 --psc 37001 --from 2026-11-16 --to 2026-11-22
 
 EG.D credentials: env EGD_CLIENT_ID / EGD_CLIENT_SECRET or the [egd] section of the
 config file (default ~/.config/egd-api-client/config.toml).
@@ -99,87 +94,6 @@ def cmd_data(args: argparse.Namespace) -> int:
     return 0
 
 
-WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-
-
-def cmd_hdo(args: argparse.Namespace) -> int:
-    """Show low-tariff (NT) periods from EG.D's public HDO data or a manual schedule."""
-    ctx = Context(args)
-    if args.list:
-        region = args.hdo_region
-        if args.psc and not region:
-            region = HdoClient(ctx.session, ctx.cache).region_for_psc(args.psc)
-        recs = HdoClient(ctx.session, ctx.cache).records()
-        codes = sorted(
-            {
-                (r["region"], r["kodHdo_A"])
-                for r in recs
-                if not region or r["region"].casefold() == region.casefold()
-            }
-        )
-        if args.json:
-            print(json.dumps([{"region": a, "code": b} for a, b in codes], indent=1))
-        else:
-            for a, b in codes:
-                print(f"{a}\t{b}")
-        return 0
-    sched = build_low_tariff(args, ctx)
-    if sched is None:
-        raise CliError("Give --hdo-code (with --psc / --hdo-region) or --low-tariff-hours.")
-    if args.date_from:
-        start, end = resolve_period(args)
-        from egd_api_client.timeutil import iter_days
-
-        rows = []
-        for d in iter_days(start, end):
-            w = sched.windows_for(d)
-            rows.append(
-                {
-                    "day": d.isoformat(),
-                    "windows": None if w is None else format_windows(w),
-                    "nt_hours": None if w is None else sum(b - a for a, b in w) / 60,
-                }
-            )
-        if args.json:
-            print(
-                json.dumps(
-                    {"schedule": sched.describe(), "days": rows}, ensure_ascii=False, indent=1
-                )
-            )
-            return 0
-        print(sched.describe())
-        for r in rows:
-            day = date.fromisoformat(r["day"])
-            if r["windows"] is None:
-                print(f"{r['day']} {day:%a}  (no schedule published for this day)")
-            else:
-                print(f"{r['day']} {day:%a}  {r['nt_hours']:5.2f} h  {r['windows']}")
-        return 0
-    periods = []
-    for validity, weekly in sched.periods:
-        periods.append(
-            {
-                "valid": "always" if validity is None else validity.describe(),
-                "days": {
-                    WEEKDAYS[i - 1]: format_windows(weekly.days.get(i, ())) for i in range(1, 8)
-                },
-            }
-        )
-    if args.json:
-        print(
-            json.dumps(
-                {"schedule": sched.describe(), "periods": periods}, ensure_ascii=False, indent=1
-            )
-        )
-        return 0
-    print(sched.describe())
-    for p in periods:
-        print(f"\nvalid {p['valid']}:")
-        for day, w in p["days"].items():
-            print(f"  {day}  {w}")
-    return 0
-
-
 def build_parser() -> argparse.ArgumentParser:
     common, period, egd = common_parser(), period_parser(), egd_parser()
     parser = argparse.ArgumentParser(
@@ -217,20 +131,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     da.add_argument("-o", "--output", metavar="FILE", help="output .csv or .json (default stdout)")
     da.set_defaults(func=cmd_data)
-
-    hd = sub.add_parser(
-        "hdo",
-        parents=[common, period, low_tariff_parser()],
-        help="show low-tariff (NT) times from EG.D's public HDO data",
-        description="Low-tariff (NT) periods for an HDO code/command from EG.D's public HDO "
-        "data (hdo.distribuce24.cz), or a manual schedule. With --from/--to the windows of each "
-        "day are listed. Note: EG.D publishes current schedules only (yearly patterns and "
-        "dated records), not a history.",
-    )
-    hd.add_argument(
-        "--list", action="store_true", help="list HDO codes (optionally of --hdo-region / --psc)"
-    )
-    hd.set_defaults(func=cmd_hdo)
 
     spot_cli.register(sub, common=common, period=period, egd=egd)
     return parser

@@ -108,8 +108,9 @@ def cmd_calc(args: argparse.Namespace) -> int:
     low_tariff = build_low_tariff(args, ctx)
     if fixed is not None and fixed.price_low_czk_kwh is not None and low_tariff is None:
         raise CliError(
-            "A low-tariff price needs the NT periods: give --hdo-code (with --psc / "
-            "--hdo-region if needed) or --low-tariff-hours. EG.D's API does not provide them."
+            "--fixed-price-low needs the low-tariff hours: give --low-tariff-hours (e.g. "
+            '"22:00-06:00") or [low_tariff] hours in the config. EG.D\'s API does not '
+            "provide NT times, nothing is assumed."
         )
     if low_tariff is not None:
         info(f"Low-tariff periods: {low_tariff.describe()}", args.json)

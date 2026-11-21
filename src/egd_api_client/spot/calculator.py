@@ -260,18 +260,6 @@ def compute(
         total.low_kwh = total.low_kwh or 0.0
         for b in buckets.values():
             b.low_kwh = b.low_kwh or 0.0
-        if low_tariff.uncovered:
-            days = sorted(low_tariff.uncovered)
-            msg = (
-                f"The low-tariff schedule has no data for {len(days)} day(s) "
-                f"({days[0]} – {days[-1]})"
-            )
-            if fixed is not None and fixed.price_low_czk_kwh is not None:
-                raise ValueError(
-                    msg + "; cannot price NT for them. Shorten the period or "
-                    "give the NT hours explicitly (--low-tariff-hours)."
-                )
-            warnings.append(msg + "; their consumption is counted as high tariff.")
 
     expected = int((t1 - t0) / QUARTER)
     if missing_kwh > 0:

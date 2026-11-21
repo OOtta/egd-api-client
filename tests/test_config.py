@@ -47,11 +47,7 @@ def test_invalid_toml(tmp_path):
         load_config(p)
 
 
-def test_new_sections_and_cli_use(tmp_path, monkeypatch, capsys):
-    import json
-
-    from egd_api_client.cli import main
-
+def test_new_sections(tmp_path):
     p = tmp_path / "c.toml"
     p.write_text(
         "[spot]\nmultiplier = 1.2\nadd_czk_mwh = 400\nnegative_multiplier = 1.0\n"
@@ -64,8 +60,5 @@ def test_new_sections_and_cli_use(tmp_path, monkeypatch, capsys):
     assert cfg.fixed["price_low_czk_kwh"] == 2
     assert cfg.low_tariff == {"hours": "22:00-06:00", "holidays": "sunday"}
 
-    monkeypatch.setenv("EGD_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("EGD_CONFIG", str(p))
-    assert main(["hdo", "--json"]) == 0
-    out = json.loads(capsys.readouterr().out)
-    assert out["schedule"] == "NT 00:00–06:00, 22:00–24:00; holidays as Sunday"
+    p.write_text('[low_tariff]\nhdo_code = "405"\n')
+    assert any("hdo_code" in w for w in load_config(p).warnings)

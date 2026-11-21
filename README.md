@@ -14,8 +14,8 @@ with it. The first feature built on top of the client is the **spot-tariff calcu
   formula – `spot × 1.15`, `spot + 400 CZK/MWh`, monthly fee, VAT – optionally per month or
   day and compared with a fixed-price tariff;
 * `egd spot prices`, `egd spot fx` – the prices (in CZK or EUR) and the EUR/CZK rates;
-* `egd hdo` – low-tariff (NT) times from EG.D's public HDO data, also usable for a
-  VT/NT fixed-price comparison in `egd spot calc`.
+* VT/NT fixed-price comparison in `egd spot calc`, with the low-tariff (NT) hours entered by
+  you.
 
 The same functionality is available as a library (`egd_api_client.EgdClient`,
 `egd_api_client.spot`), so more features can be added as further sub-commands.
@@ -32,7 +32,7 @@ The same functionality is available as a library (`egd_api_client.EgdClient`,
 - [Using it as a library](#using-it-as-a-library)
 - [How the cost is calculated](#how-the-cost-is-calculated)
 - [EUR/CZK conversion](#eurczk-conversion)
-- [Low tariff (NT) and HDO](#low-tariff-nt-and-hdo)
+- [Low tariff (NT)](#low-tariff-nt)
 - [Distribution fees](#distribution-fees)
 - [Data sources](#data-sources)
 - [Input files](#input-files)
@@ -145,7 +145,6 @@ Metering data are never cached.
 | `egd meters` | list metering points available to your API credentials |
 | `egd profiles` | list EG.D profile codes |
 | `egd data` | download 15-minute consumption (`--kind consumption`, default) or production (`--kind production`) to CSV or JSON |
-| `egd hdo` | low-tariff (NT) times for an HDO code (EG.D public data) or a manual schedule; `--list` lists codes |
 | `egd spot calc` | compute the spot-tariff cost of your consumption (API or file) |
 | `egd spot prices --currency czk\|eur` | download / summarise / export OTE spot prices (`-o .csv/.json`); `--currency` is required |
 | `egd spot fx` | the ČNB EUR/CZK rate applied to each delivery day (`-o .csv/.json`, `--json`) |
@@ -169,10 +168,10 @@ The most important options of `egd spot calc`:
 | `--negative MODE` | negative price handling: `as-is` (default), `clamp-spot`, `clamp-total` – see below |
 | `--price-resolution` | `auto` (15-min prices where they exist) or `hourly` |
 | `--fixed-price CZK_KWH` | compare with a fixed price per kWh (excl. VAT); the VT price of a two-rate product |
-| `--fixed-price-low CZK_KWH` | NT price of the fixed product; needs the NT periods (below) |
-| `--hdo-code CODE` (+ `--psc` / `--hdo-region`, `--hdo-relay`) | NT periods from EG.D's HDO data |
-| `--low-tariff-hours RANGES`, `--low-tariff-hours-weekend RANGES` | NT periods given by hand, e.g. `"22:00-06:00,13:00-15:00"` |
-| `--holidays auto\|sunday\|weekday` | whether public holidays follow the Sunday NT schedule |
+| `--fixed-price-low CZK_KWH` | NT price of the fixed product; requires `--low-tariff-hours` |
+| `--low-tariff-hours RANGES` | your NT hours, e.g. `"22:00-06:00,13:00-15:00"` (every day) |
+| `--low-tariff-hours-weekend RANGES` | different NT hours for Saturday and Sunday |
+| `--holidays weekday\|sunday` | public holidays use their weekday's hours (default) or the weekend hours |
 | `--fixed-monthly-fee CZK` | monthly fee of the fixed tariff |
 | `-b, --breakdown` | `none`, `month` or `day` |
 | `-o, --export FILE` | write the result to `.json` (full) or `.csv` (breakdown rows) |
@@ -202,17 +201,14 @@ egd spot calc -i export.csv -a 400 --negative clamp-total
 # Supplier: spot × 1.15 + 400, but at negative prices only the spot itself
 egd spot calc -i export.csv -m 1.15 -a 400 --negative-multiplier 1 --negative-add-czk-mwh 0
 
-# Compare with a two-rate fixed product (VT 4.20 / NT 2.90 CZK/kWh) using your HDO code
+# Compare with a two-rate fixed product (VT 4.20 / NT 2.90 CZK/kWh), NT 22–06 h + 13–15 h
 egd spot calc -i export.csv -a 400 --fixed-price 4.2 --fixed-price-low 2.9 \
-    --hdo-code 405 --psc 37001
+    --low-tariff-hours "22:00-06:00,13:00-15:00"
 
 # Just the prices (currency must be chosen), and the exchange rates used for them
 egd spot prices --from 2025-11 --currency czk --export prices-2025-11.csv
 egd spot prices --from 2025-11 --currency eur --export prices-2025-11-eur.json
 egd spot fx --from 2026-10-24 --to 2026-11-02 -o fx.csv
-
-# Low-tariff times of an HDO code, day by day
-egd hdo --hdo-code 405 --psc 37001 --from 2026-11-16 --to 2026-11-22
 ```
 
 ## Using it as a library
@@ -308,40 +304,30 @@ every run, so a rate is never "frozen" in the cache. The fixing of a business da
 only after ~14:30 that day; until then (and for tomorrow's prices, which OTE publishes
 around 13:00) the last available fixing is used, which makes such figures provisional.
 
-## Low tariff (NT) and HDO
+## Low tariff (NT)
 
-**What EG.D's OpenAPI offers:** nothing about tariffs. Checked against the live API with a
+EG.D's OpenAPI says nothing about tariffs. This was checked against the live API with a
 type B metering point (Nov 2026): `/rest/om` returns only `ean` and `typMereni`, the profile
 list has no VT/NT split for A/B meters, and there are no HDO, distribution-rate or
-circuit-breaker endpoints. The legacy smart-meter endpoint (`/rest/c/…`) lists VT/NT register
-profiles ("Stav číselníku spotřeby VT/NT", "Spotřeba energie vysoký/nízký tarif"), but they
-are for C1 smart meters only (an A/B point is refused). `egd spot calc` doesn't use them yet.
+circuit-breaker endpoints. The legacy smart-meter endpoint (`/rest/c/…`) lists VT/NT
+register profiles, but only for C1 smart meters (an A/B point is refused).
 
-**Where NT periods come from instead:**
+The NT periods are therefore **always entered by you**, and nothing is assumed or
+downloaded:
 
-1. **EG.D's public HDO data** – `https://hdo.distribuce24.cz/casy` (the data behind
-   egd.cz → *Časy platnosti nízkého tarifu*; no login) and `…/region` (postcode → region).
-   Give the code/command from your HDO receiver, or from the display of an interval (A/B)
-   or smart meter, which control the tariff internally: `--hdo-code 405`, `A1B4DP6`,
-   `PH20_1`, `Cd56`, `d57` … If the code exists in several regions add `--psc` or
-   `--hdo-region`. If it has several relay schedules, add `--hdo-relay` (`egd hdo` lists
-   them). Matching is case-insensitive; `-` and `_` are treated alike.
-2. **A manual schedule** – `--low-tariff-hours "22:00-06:00,13:00-15:00"` (ranges may
-   cross midnight; boundaries need not be on quarter-hours), optionally
-   `--low-tariff-hours-weekend` for Saturday and Sunday.
+* `--low-tariff-hours "22:00-06:00,13:00-15:00"` – NT hours for every day. Ranges may cross
+  midnight, and boundaries need not be on quarter-hours: an interval that is partly NT is
+  split proportionally.
+* `--low-tariff-hours-weekend "…"` – different hours for Saturday and Sunday (optional).
+* `--holidays weekday|sunday` – Czech public holidays use the hours of their weekday
+  (default) or the weekend hours.
+* The same can be set in the config section `[low_tariff]` (`hours`, `hours_weekend`,
+  `holidays`).
 
-Both can also be set in the `[low_tariff]` config section. **Public holidays** use the
-Sunday windows with `--holidays sunday` and their weekday with `weekday`. `auto`, the
-default, means Sunday for classic HDO regions (`ZAPAD`, `VYCHOD`, `VERSACOM`) and weekday
-for smart/TOU commands and manual schedules. This follows the convention used by the
-community Home Assistant integration for this data; EG.D does not document it in the data.
-
-**Limitation:** EG.D publishes the *current* schedules only. These are yearly patterns
-(e.g. "every year 01.10.–31.03.") plus dated records (e.g. 01.09.2026–25.10.2026), with no
-history. Yearly patterns are applied to past years as published. For days no record covers,
-a VT/NT price comparison stops with an error (shorten the period or give
-`--low-tariff-hours`); without an NT price only a warning is shown. If your NT times
-changed in the past, use the manual schedule for those periods.
+`--fixed-price-low` without low-tariff hours is an error. Your NT times are listed in the
+Distribuce24 portal or on egd.cz (*Časy platnosti nízkého tarifu*) for your HDO code. If they
+changed during the period, calculate the periods separately. Times are local
+(Europe/Prague) wall-clock times, so DST days are handled naturally.
 
 ## Distribution fees
 
@@ -428,9 +414,9 @@ Project layout:
 src/egd_api_client/
   client.py          EG.D OpenAPI client (token, metering points, profiles, readings)
   readings_io.py     CSV/XLSX import, canonical CSV / JSON export
-  lowtariff.py       NT schedules, EG.D public HDO data, Czech public holidays
+  lowtariff.py       NT schedules (manual hours), Czech public holidays
   models.py          Reading, PricePoint, LoadResult
-  cli.py             `egd` entry point and core commands (meters, profiles, data, hdo)
+  cli.py             `egd` entry point and core commands (meters, profiles, data)
   cli_common.py      shared CLI options, period handling, context
   config.py, cache.py, timeutil.py, http.py
   spot/              spot-tariff feature (`egd spot …`)
@@ -473,7 +459,6 @@ cena = spot × koeficient + přirážka [Kč/MWh]   (+ měsíční poplatek, + D
 | `egd spot calc` | výpočet ceny se spotovým tarifem |
 | `egd spot prices --currency czk\|eur` | spotové ceny OTE v CZK nebo EUR (měnu je nutné zvolit), export `-o .csv/.json` |
 | `egd spot fx` | kurz EUR/CZK použitý pro každý den, export `-o .csv/.json` |
-| `egd hdo` | časy nízkého tarifu (NT) podle kódu HDO z veřejných dat EG.D |
 
 Příklad – dodavatel účtuje `spot × 1,15 + 400 Kč/MWh`, 99 Kč měsíčně, s DPH 21 %, porovnání
 s fixní cenou 3,20 Kč/kWh:
@@ -500,10 +485,11 @@ Pak `--negative as-is` (výchozí, vzorec beze změny – záporná cena snižuj
 ceny), `clamp-total` (výsledná cena nikdy pod 0).
 
 **Fixní cena VT/NT:** `--fixed-price` (VT) a `--fixed-price-low` (NT). API EG.D časy NT
-neposkytuje (ani sazbu, HDO, jistič). Berou se proto z veřejných dat HDO EG.D podle kódu
-z přijímače HDO / displeje elektroměru (`--hdo-code 405 --psc 37001`), nebo je zadáte
-ručně (`--low-tariff-hours "22:00-06:00"`). EG.D zveřejňuje jen aktuální rozpisy (roční
-vzory a datované záznamy), ne historii. Dny bez rozpisu výpočet s NT cenou odmítne.
+neposkytuje (ani sazbu, HDO, jistič), proto je vždy zadáváte sami:
+`--low-tariff-hours "22:00-06:00,13:00-15:00"`, případně `--low-tariff-hours-weekend` pro
+sobotu a neděli a `--holidays weekday|sunday` (svátky podle dne v týdnu, nebo jako víkend);
+nebo v konfiguraci `[low_tariff]`. Bez zadaných časů NT výpočet s `--fixed-price-low`
+skončí chybou, nic se nedopočítává automaticky.
 
 **Poplatky distributora:** API je neposkytuje, celková cena s distribucí se proto nepočítá.
 

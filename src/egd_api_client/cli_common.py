@@ -13,12 +13,7 @@ from egd_api_client.cache import JsonCache, default_cache_dir
 from egd_api_client.client import EgdClient, EgdCredentials, Kind
 from egd_api_client.config import Config, load_config
 from egd_api_client.http import make_session
-from egd_api_client.lowtariff import (
-    HdoClient,
-    LowTariffError,
-    LowTariffSchedule,
-    manual_schedule,
-)
+from egd_api_client.lowtariff import LowTariffError, LowTariffSchedule
 from egd_api_client.models import LoadResult
 from egd_api_client.timeutil import local_date, local_day_bounds_utc
 
@@ -136,29 +131,12 @@ def low_tariff_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(add_help=False)
     g = p.add_argument_group(
         "low-tariff (NT) periods",
-        "EG.D's API does not provide them; give your HDO code/command (from the HDO receiver "
-        "or the meter display) or the NT hours. Config section [low_tariff].",
-    )
-    g.add_argument(
-        "--hdo-code",
-        metavar="CODE",
-        help="HDO code or command, e.g. 405, A1B4DP6, PH20_1, d57 (EG.D public data)",
-    )
-    g.add_argument(
-        "--hdo-region",
-        metavar="REGION",
-        help="HDO region (ZAPAD, VYCHOD, VERSACOM, SM, TOU, PH) if the code is ambiguous",
-    )
-    g.add_argument("--psc", metavar="PSC", help="postcode, to find the HDO region")
-    g.add_argument(
-        "--hdo-relay",
-        metavar="LABEL",
-        help="schedule label when the code has several (e.g. 'D57d-relé1-PVTC,PV')",
+        "EG.D's API does not provide them; enter your NT times (config section [low_tariff]).",
     )
     g.add_argument(
         "--low-tariff-hours",
         metavar="RANGES",
-        help='NT hours for every day, e.g. "22:00-06:00,13:00-15:00"',
+        help='NT hours, e.g. "22:00-06:00,13:00-15:00" (every day unless a weekend set is given)',
     )
     g.add_argument(
         "--low-tariff-hours-weekend",
@@ -167,9 +145,8 @@ def low_tariff_parser() -> argparse.ArgumentParser:
     )
     g.add_argument(
         "--holidays",
-        choices=["auto", "sunday", "weekday"],
-        help="public holidays follow the Sunday schedule or their weekday "
-        "(auto: Sunday for classic HDO regions, weekday otherwise)",
+        choices=["weekday", "sunday"],
+        help="public holidays use the hours of their weekday (default) or the weekend hours",
     )
     return p
 
@@ -177,33 +154,21 @@ def low_tariff_parser() -> argparse.ArgumentParser:
 def build_low_tariff(args: argparse.Namespace, ctx: Context) -> LowTariffSchedule | None:
     """NT schedule from CLI options or the [low_tariff] config section (CLI wins)."""
     lt = ctx.cfg.low_tariff
-    cli_given = any(
-        getattr(args, k, None) is not None
-        for k in ("hdo_code", "low_tariff_hours", "low_tariff_hours_weekend")
-    )
-    src = {} if cli_given else lt
-    code = getattr(args, "hdo_code", None) or src.get("hdo_code")
-    hours = getattr(args, "low_tariff_hours", None) or src.get("hours")
-    weekend = getattr(args, "low_tariff_hours_weekend", None) or src.get("hours_weekend")
-    holidays = getattr(args, "holidays", None) or lt.get("holidays", "auto")
-    try:
-        if code and (hours or weekend):
-            raise CliError("Use either an HDO code or explicit low-tariff hours, not both.")
-        if code:
-            return HdoClient(ctx.session, ctx.cache).schedule(
-                str(code),
-                region=first(getattr(args, "hdo_region", None), lt.get("hdo_region")),
-                psc=first(getattr(args, "psc", None), lt.get("psc")),
-                relay=first(getattr(args, "hdo_relay", None), lt.get("hdo_relay")),
-                holidays=holidays,
-            )
-        if weekend and not hours:
+    hours = first(getattr(args, "low_tariff_hours", None), lt.get("hours"))
+    weekend = first(getattr(args, "low_tariff_hours_weekend", None), lt.get("hours_weekend"))
+    holidays = first(getattr(args, "holidays", None), lt.get("holidays"), "weekday")
+    if holidays not in ("weekday", "sunday"):
+        raise CliError(f"[low_tariff] holidays must be 'weekday' or 'sunday', not {holidays!r}")
+    if hours is None:
+        if weekend is not None:
             raise CliError("--low-tariff-hours-weekend needs --low-tariff-hours as well.")
-        if hours:
-            return manual_schedule(str(hours), weekend and str(weekend), holidays)
+        return None
+    try:
+        return LowTariffSchedule.parse(
+            str(hours), None if weekend is None else str(weekend), holidays
+        )
     except LowTariffError as exc:
-        raise CliError(str(exc)) from exc
-    return None
+        raise CliError(f"low-tariff hours: {exc}") from exc
 
 
 # ------------------------------------------------------------------------------------------

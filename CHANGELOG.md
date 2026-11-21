@@ -22,10 +22,10 @@ First version, published as **egd-api-client** (command `egd`).
   (`--negative-multiplier`, `--negative-add-czk-mwh`; fall back to `-m` / `-a`), consistent
   with the `--negative` clamp modes.
 - `egd spot calc`: two-rate fixed comparison (`--fixed-price` = VT, `--fixed-price-low` = NT)
-  with NT periods from EG.D's public HDO data (`--hdo-code`, `--psc`, `--hdo-region`,
-  `--hdo-relay`) or a manual schedule (`--low-tariff-hours`, `--low-tariff-hours-weekend`,
-  `--holidays`); NT consumption in the report. New `egd hdo` command and
-  `egd_api_client.lowtariff` module (Czech public holidays included).
+  with NT periods entered by the user only (`--low-tariff-hours`,
+  `--low-tariff-hours-weekend`, `--holidays weekday|sunday`, config `[low_tariff]`); NT
+  consumption in the report. EG.D's OpenAPI provides no NT/HDO data, and nothing is
+  downloaded or assumed.
 - `egd spot prices --currency czk|eur` (required); EUR uses OTE's own EUR prices in the hourly
   era as well.
 - `egd spot fx` gained `-o/--export` (CSV/JSON) and a summary, like `egd spot prices`.

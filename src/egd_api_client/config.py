@@ -72,15 +72,7 @@ KNOWN = {
         "price_resolution",
     },
     "spot.fixed": {"price_czk_kwh", "price_low_czk_kwh", "monthly_fee"},
-    "low_tariff": {
-        "hours",
-        "hours_weekend",
-        "holidays",
-        "hdo_code",
-        "hdo_region",
-        "psc",
-        "hdo_relay",
-    },
+    "low_tariff": {"hours", "hours_weekend", "holidays"},
 }
 
 
