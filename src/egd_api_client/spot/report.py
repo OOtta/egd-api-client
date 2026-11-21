@@ -57,11 +57,30 @@ def render_summary(res: Result, out: TextIO) -> None:
             "spot would have been CHEAPER by" if s > 0 else "spot would have been MORE EXPENSIVE by"
         )
         w(f"Difference:        {verdict} {fmt(abs(s))} CZK\n")
-    w(
-        "\nNote: distribution charges (regulated EG.D fees, POZE, system services, ...) are\n"
-        "the same for any supplier and are NOT included unless you add them via\n"
-        "--add-czk-mwh / --monthly-fee.\n"
-    )
+    if res.distribution is not None:
+        incl = " incl. VAT" if res.tariff.vat_percent else " excl. VAT"
+        w("\n")
+        w(
+            f"Distribution:      {fmt(t.distribution_total_czk)} CZK{incl} "
+            f"({res.distribution.describe()}, as entered)\n"
+        )
+        per_kwh = (t.total_with_distribution_czk or 0.0) / t.kwh if t.kwh else None
+        w(
+            f"Spot + distrib.:   {fmt(t.total_with_distribution_czk)} CZK "
+            f"({fmt(per_kwh, 4)} CZK/kWh)\n"
+        )
+        if res.fixed is not None:
+            fpk = (t.fixed_total_with_distribution_czk or 0.0) / t.kwh if t.kwh else None
+            w(
+                f"Fixed + distrib.:  {fmt(t.fixed_total_with_distribution_czk)} CZK "
+                f"({fmt(fpk, 4)} CZK/kWh)\n"
+            )
+    else:
+        w(
+            "\nNote: distribution charges (regulated EG.D fees, POZE, system services, ...) "
+            "are\nthe same for any supplier and are NOT included unless you enter them with\n"
+            "--distribution-high / --distribution-low / --distribution-monthly-fee.\n"
+        )
 
 
 def render_breakdown(res: Result, out: TextIO) -> None:
@@ -74,8 +93,13 @@ def render_breakdown(res: Result, out: TextIO) -> None:
         + (["NT kWh"] if low else [])
         + ["Spot avg", "Energy", "Fee", "Total", "CZK/kWh"]
     )
+    dist = res.total.distribution_czk is not None
+    if dist:
+        cols += ["Distrib.", "Total+D"]
     if fixed:
         cols += ["Fixed", "Saved"]
+        if dist:
+            cols += ["Fixed+D"]
     rows = []
     for b in res.buckets:
         row = (
@@ -89,8 +113,12 @@ def render_breakdown(res: Result, out: TextIO) -> None:
                 fmt(b.avg_price_czk_kwh, 4),
             ]
         )
+        if dist:
+            row += [fmt(b.distribution_czk), fmt(b.total_with_distribution_czk)]
         if fixed:
             row += [fmt(b.fixed_total_czk), fmt(b.savings_czk)]
+            if dist:
+                row += [fmt(b.fixed_total_with_distribution_czk)]
         rows.append(row)
     widths = [max(len(c), *(len(r[i]) for r in rows)) for i, c in enumerate(cols)]
     line = "  ".join(
@@ -102,11 +130,12 @@ def render_breakdown(res: Result, out: TextIO) -> None:
             "  ".join(v.ljust(widths[0]) if i == 0 else v.rjust(widths[i]) for i, v in enumerate(r))
             + "\n"
         )
-    incl = "Total, Fixed and Saved" if fixed else "Total"
+    money = ["Total"] + (["Total+D"] if dist else []) + (["Fixed", "Saved"] if fixed else [])
+    money += ["Fixed+D"] if fixed and dist else []
+    incl = ", ".join(money[:-1]) + " and " + money[-1] if len(money) > 1 else money[0]
+    excl = "Energy, Fee and Distrib." if dist else "Energy and Fee"
     vat_note = (
-        f"Energy and Fee excl. VAT; {incl} incl. VAT"
-        if res.tariff.vat_percent
-        else "all amounts excl. VAT"
+        f"{excl} excl. VAT; {incl} incl. VAT" if res.tariff.vat_percent else "all amounts excl. VAT"
     )
     out.write(f"(Spot avg in CZK/MWh, consumption-weighted; money in CZK; {vat_note})\n")
 

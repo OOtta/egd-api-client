@@ -91,8 +91,8 @@ Fixed tariff:      4 026.73 CZK (3.5 CZK/kWh + 150 CZK/month)
 Difference:        spot would have been MORE EXPENSIVE by 198.83 CZK
 
 Note: distribution charges (regulated EG.D fees, POZE, system services, ...) are
-the same for any supplier and are NOT included unless you add them via
---add-czk-mwh / --monthly-fee.
+the same for any supplier and are NOT included unless you enter them with
+--distribution-high / --distribution-low / --distribution-monthly-fee.
 
 Period       kWh  Spot avg    Energy     Fee     Total  CZK/kWh     Fixed    Saved
 ----------------------------------------------------------------------------------
@@ -172,6 +172,9 @@ The most important options of `egd spot calc`:
 | `--low-tariff-hours RANGES` | your NT hours, e.g. `"22:00-06:00,13:00-15:00"` (every day) |
 | `--low-tariff-hours-weekend RANGES` | different NT hours for Saturday and Sunday |
 | `--holidays weekday\|sunday` | public holidays use their weekday's hours (default) or the weekend hours |
+| `--distribution-high CZK_KWH` | your distribution charge per kWh in VT, or for all consumption if no NT charge is given |
+| `--distribution-low CZK_KWH` | your distribution charge per kWh in NT; requires `--low-tariff-hours` |
+| `--distribution-monthly-fee CZK` | your fixed monthly distribution charges (circuit breaker etc.) |
 | `--fixed-monthly-fee CZK` | monthly fee of the fixed tariff |
 | `-b, --breakdown` | `none`, `month` or `day` |
 | `-o, --export FILE` | write the result to `.json` (full) or `.csv` (breakdown rows) |
@@ -204,6 +207,11 @@ egd spot calc -i export.csv -m 1.15 -a 400 --negative-multiplier 1 --negative-ad
 # Compare with a two-rate fixed product (VT 4.20 / NT 2.90 CZK/kWh), NT 22–06 h + 13–15 h
 egd spot calc -i export.csv -a 400 --fixed-price 4.2 --fixed-price-low 2.9 \
     --low-tariff-hours "22:00-06:00,13:00-15:00"
+
+# Add your own distribution charges (example values!) to both spot and fixed totals
+egd spot calc -i export.csv -m 1.15 -a 400 --vat --fixed-price 4.0 --fixed-price-low 3.0 \
+    --low-tariff-hours "22:00-06:00" --distribution-high 2.0 --distribution-low 0.5 \
+    --distribution-monthly-fee 300 -b month
 
 # Just the prices (currency must be chosen), and the exchange rates used for them
 egd spot prices --from 2025-11 --currency czk --export prices-2025-11.csv
@@ -263,11 +271,9 @@ effective price = total / Σ E_i                      [CZK/kWh]
 * **Fixed VT/NT comparison.** With `--fixed-price-low`, each 15-minute interval is priced at
   the NT price for the part of it that falls into a low-tariff window and at the VT price
   (`--fixed-price`) for the rest; the NT consumption is shown in the report (`NT kWh`).
-* **What is not included.** Distribution and other regulated charges (EG.D distribution
-  fee, reserved capacity / circuit breaker fee, system services, POZE, electricity tax,
-  OTE fee) are the same whichever supplier you choose, so they are left out. If you want an
-  all-in figure, add the per-MWh components to `--add-czk-mwh` and the monthly ones to
-  `--monthly-fee`.
+* **Distribution charges** (EG.D distribution fee, circuit breaker, system services, POZE,
+  electricity tax …) are the same whichever supplier you choose, so they are left out
+  unless you enter them – see [Distribution fees](#distribution-fees).
 * The report also shows your **consumption-weighted average spot price** next to the simple
   average of the period – if yours is higher, you consume more when power is expensive.
 * Periods without consumption data or without a market price are excluded and reported as
@@ -331,11 +337,28 @@ changed during the period, calculate the periods separately. Times are local
 
 ## Distribution fees
 
-EG.D's OpenAPI doesn't provide distribution tariff data: no distribution rate (D02d,
-D25d, …), no circuit-breaker size and no fees. That means no total including
-distributor fees is calculated; the tool deliberately does not hard-code ERÚ's regulated
-price tables. If you want an all-in figure, add the per-MWh components to `--add-czk-mwh` and
-the monthly ones to `--monthly-fee`.
+EG.D's OpenAPI does not provide any distribution tariff data (no distribution rate such as
+D02d/D25d, no circuit-breaker size, no fees), and the tool deliberately contains no
+regulated price tables. You can **enter your own charges** – in CZK, excl. VAT, like the
+fixed prices:
+
+| Option | Config `[distribution]` | Meaning |
+|---|---|---|
+| `--distribution-high CZK_KWH` | `high_czk_kwh` | per-kWh charge in the high tariff (VT); applies to **all** consumption when no NT charge is given |
+| `--distribution-low CZK_KWH` | `low_czk_kwh` | per-kWh charge in the low tariff (NT); requires `--low-tariff-hours` (error otherwise) and `--distribution-high` |
+| `--distribution-monthly-fee CZK` | `monthly_fee` | fixed monthly charges (circuit breaker / reserved capacity etc.), prorated by days |
+
+Sum up all per-kWh components of your rate yourself (distribution, system services, POZE,
+electricity tax, OTE fee …), separately for VT and NT. The charges are computed once per
+interval (NT share from your low-tariff hours, like the fixed NT price) and added to
+**both** results, VAT on top with `--vat`:
+
+* the report shows `Distribution`, `Spot + distrib.` and (with `--fixed-price`)
+  `Fixed + distrib.`; `TOTAL`, `Fixed tariff` and `Difference` stay supplier-only (the
+  distribution part is identical for both, so the difference does not change);
+* the breakdown adds `Distrib.` (excl. VAT), `Total+D` and `Fixed+D` (incl. VAT);
+* JSON/CSV exports add `distribution_czk`, `total_with_distribution_czk`,
+  `avg_price_with_distribution_czk_kwh` and `fixed_total_with_distribution_czk`.
 
 ## Data sources
 
@@ -470,7 +493,7 @@ egd spot calc --ean 859182400xxxxxxxxx --from 2025-01 --to 2025-12 \
 ```
 
 Konfigurace: `~/.config/egd-api-client/config.toml` (sekce `[egd]`, `[spot]`, `[spot.fixed]`,
-`[low_tariff]`),
+`[low_tariff]`, `[distribution]`),
 proměnné prostředí `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`.
 
 **Přístup k API:** na [portal.distribuce24.cz](https://portal.distribuce24.cz) →
@@ -491,11 +514,16 @@ sobotu a neděli a `--holidays weekday|sunday` (svátky podle dne v týdnu, nebo
 nebo v konfiguraci `[low_tariff]`. Bez zadaných časů NT výpočet s `--fixed-price-low`
 skončí chybou, nic se nedopočítává automaticky.
 
-**Poplatky distributora:** API je neposkytuje, celková cena s distribucí se proto nepočítá.
+**Poplatky distributora:** API EG.D je neposkytuje a program nemá zabudované žádné ceníky –
+zadáte je sami (Kč bez DPH): `--distribution-high` (Kč/kWh ve VT, bez NT ceny pro veškerou
+spotřebu), `--distribution-low` (Kč/kWh v NT, vyžaduje `--low-tariff-hours`, jinak chyba),
+`--distribution-monthly-fee` (měsíční platby, např. za jistič); v konfiguraci sekce
+`[distribution]` (`high_czk_kwh`, `low_czk_kwh`, `monthly_fee`). Přičtou se ke spotovému
+i fixnímu výsledku (s DPH při `--vat`) – výpis ukazuje `Spot + distrib.` a `Fixed + distrib.`,
+rozpis a exporty sloupce s distribucí.
 
-**Nezahrnuto:** regulované platby za distribuci (distribuční poplatek, jistič, systémové
-služby, POZE, daň z elektřiny) – ty jsou stejné u každého dodavatele. Chcete-li celkovou
-cenu, přidejte je do `--add-czk-mwh` / `--monthly-fee`.
+**Nezahrnuto bez zadání:** regulované platby za distribuci (distribuční poplatek, jistič,
+systémové služby, POZE, daň z elektřiny) – jsou stejné u každého dodavatele; viz výše.
 
 Výsledek je odhad, ne faktura – dodavatelé se liší v kurzu, zaokrouhlování a dalších
 poplatcích.

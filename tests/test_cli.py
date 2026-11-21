@@ -314,3 +314,29 @@ def test_low_tariff_cli_errors(capsys, tmp_path):
     assert "low-tariff hours: invalid time" in capsys.readouterr().err
     assert main([*base, "--low-tariff-hours-weekend", "00:00-24:00"]) == 2
     assert "needs --low-tariff-hours" in capsys.readouterr().err
+
+
+def test_calc_distribution_text_and_json(mocked, tmp_path, capsys):
+    add_cnb(mocked)
+    add_ote(mocked, FakeOte(lambda d, i: 1000.0 if d < date(2025, 10, 1) else 40.0))
+    base = ["spot", "calc", "-i", str(sample_csv(tmp_path)), "--to", "2025-09-30"]
+    dist = ["--distribution-high", "2", "--distribution-low", "0.5",
+            "--low-tariff-hours", "22:00-06:00", "--fixed-price", "4", "--vat"]  # fmt: skip
+    assert main([*base, *dist, "-b", "month"]) == 0
+    out = capsys.readouterr().out
+    assert "Distribution:" in out and "Spot + distrib.:" in out and "Fixed + distrib.:" in out
+    assert "Distrib." in out and "Total+D" in out and "Fixed+D" in out
+    assert "NOT included" not in out
+    assert main([*base, *dist, "--json"]) == 0
+    s = json.loads(capsys.readouterr().out)["summary"]
+    assert s["distribution_czk"] == pytest.approx(8 * 0.5 + 16 * 2)  # 24 kWh, 8 h NT
+    assert s["total_with_distribution_czk"] == pytest.approx((24 * 1.0 + 36) * 1.21)
+    assert s["fixed_total_with_distribution_czk"] == pytest.approx((24 * 4 + 36) * 1.21)
+
+
+def test_calc_distribution_errors(capsys, tmp_path):
+    base = ["spot", "calc", "-i", str(sample_csv(tmp_path))]
+    assert main([*base, "--distribution-high", "2", "--distribution-low", "1"]) == 2
+    assert "--distribution-low needs the low-tariff hours" in capsys.readouterr().err
+    assert main([*base, "--distribution-low", "1", "--low-tariff-hours", "22:00-06:00"]) == 2
+    assert "needs --distribution-high" in capsys.readouterr().err

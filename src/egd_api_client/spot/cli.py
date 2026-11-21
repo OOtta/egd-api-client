@@ -34,7 +34,7 @@ from egd_api_client.spot.report import (
     render_breakdown,
     render_summary,
 )
-from egd_api_client.spot.tariff import FixedTariff, SpotTariff
+from egd_api_client.spot.tariff import DistributionTariff, FixedTariff, SpotTariff
 from egd_api_client.timeutil import iter_days, local_date
 
 
@@ -85,6 +85,18 @@ def build_fixed(args: argparse.Namespace, cfg: Config) -> FixedTariff | None:
     return FixedTariff(float(price), float(fee), low)
 
 
+def build_distribution(args: argparse.Namespace, cfg: Config) -> DistributionTariff | None:
+    d = cfg.distribution
+    high = _opt_float(first(args.distribution_high, d.get("high_czk_kwh")))
+    low = _opt_float(first(args.distribution_low, d.get("low_czk_kwh")))
+    fee = _opt_float(first(args.distribution_monthly_fee, d.get("monthly_fee")))
+    if high is None and low is None and fee is None:
+        return None
+    if low is not None and high is None:
+        raise CliError("--distribution-low needs --distribution-high (the VT charge) as well.")
+    return DistributionTariff(high or 0.0, low, fee or 0.0)
+
+
 def file_options(args: argparse.Namespace) -> FileOptions:
     return FileOptions(
         time_column=args.time_column,
@@ -111,6 +123,13 @@ def cmd_calc(args: argparse.Namespace) -> int:
             "--fixed-price-low needs the low-tariff hours: give --low-tariff-hours (e.g. "
             '"22:00-06:00") or [low_tariff] hours in the config. EG.D\'s API does not '
             "provide NT times, nothing is assumed."
+        )
+    distribution = build_distribution(args, ctx.cfg)
+    if distribution is not None and distribution.low_czk_kwh is not None and low_tariff is None:
+        raise CliError(
+            "--distribution-low needs the low-tariff hours: give --low-tariff-hours (e.g. "
+            '"22:00-06:00") or [low_tariff] hours in the config. Without NT hours use only '
+            "--distribution-high, which then applies to all consumption."
         )
     if low_tariff is not None:
         info(f"Low-tariff periods: {low_tariff.describe()}", args.json)
@@ -147,6 +166,7 @@ def cmd_calc(args: argparse.Namespace) -> int:
             fixed=fixed,
             breakdown=args.breakdown,
             low_tariff=low_tariff,
+            distribution=distribution,
         )
     except ValueError as exc:
         raise CliError(str(exc)) from exc
@@ -368,6 +388,29 @@ def register(
     )
     f.add_argument(
         "--fixed-monthly-fee", type=float, metavar="CZK", help="monthly fee of the fixed tariff"
+    )
+
+    dg = c.add_argument_group(
+        "distribution charges (entered by you, CZK excl. VAT; added to spot and fixed totals)"
+    )
+    dg.add_argument(
+        "--distribution-high",
+        type=float,
+        metavar="CZK_KWH",
+        help="distribution charge per kWh in the high tariff (VT), or for all consumption "
+        "when --distribution-low is not given",
+    )
+    dg.add_argument(
+        "--distribution-low",
+        type=float,
+        metavar="CZK_KWH",
+        help="distribution charge per kWh in the low tariff (NT); needs --low-tariff-hours",
+    )
+    dg.add_argument(
+        "--distribution-monthly-fee",
+        type=float,
+        metavar="CZK",
+        help="fixed monthly distribution charges (circuit breaker etc.), prorated by days",
     )
 
     o = c.add_argument_group("output")

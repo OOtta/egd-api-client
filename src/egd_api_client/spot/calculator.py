@@ -9,7 +9,7 @@ from typing import Literal
 
 from egd_api_client.lowtariff import LowTariffSchedule
 from egd_api_client.models import PricePoint, Reading
-from egd_api_client.spot.tariff import FixedTariff, SpotTariff
+from egd_api_client.spot.tariff import DistributionTariff, FixedTariff, SpotTariff
 from egd_api_client.timeutil import (
     QUARTER,
     days_in_month,
@@ -43,6 +43,7 @@ class Bucket:
     negative_kwh: float = 0.0
     fixed_czk: float | None = None  # comparison tariff incl. fee, excl. VAT
     low_kwh: float | None = None  # consumption in low-tariff (NT) periods, if known
+    distribution_czk: float | None = None  # user-supplied distribution charges, excl. VAT
     vat_factor: float = 1.0
 
     @property
@@ -76,6 +77,22 @@ class Bucket:
         return None if self.fixed_czk is None else self.fixed_czk * self.vat_factor
 
     @property
+    def distribution_total_czk(self) -> float | None:
+        """Distribution charges incl. VAT (if VAT is enabled)."""
+        d = self.distribution_czk
+        return None if d is None else d * self.vat_factor
+
+    @property
+    def total_with_distribution_czk(self) -> float | None:
+        d = self.distribution_total_czk
+        return None if d is None else self.total_czk + d
+
+    @property
+    def fixed_total_with_distribution_czk(self) -> float | None:
+        d, f = self.distribution_total_czk, self.fixed_total_czk
+        return None if d is None or f is None else f + d
+
+    @property
     def savings_czk(self) -> float | None:
         """Positive = spot would have been cheaper than the fixed tariff."""
         f = self.fixed_total_czk
@@ -96,9 +113,20 @@ class Bucket:
         }
         if self.low_kwh is not None:
             out["low_tariff_kwh"] = round(self.low_kwh, 3)
+        if self.distribution_czk is not None:
+            out["distribution_czk"] = round(self.distribution_czk, 2)
+            out["total_with_distribution_czk"] = _r(self.total_with_distribution_czk, 2)
+            out["avg_price_with_distribution_czk_kwh"] = _r(
+                self.total_with_distribution_czk / self.kwh if self.kwh else None,
+                r,  # type: ignore[operator]
+            )
         if self.fixed_czk is not None:
             out["fixed_total_czk"] = _r(self.fixed_total_czk, 2)
             out["savings_czk"] = _r(self.savings_czk, 2)
+            if self.distribution_czk is not None:
+                out["fixed_total_with_distribution_czk"] = _r(
+                    self.fixed_total_with_distribution_czk, 2
+                )
         return out
 
 
@@ -121,6 +149,7 @@ class Result:
     missing_price_kwh: float
     warnings: list[str] = field(default_factory=list)
     low_tariff: str | None = None  # description of the NT schedule used
+    distribution: DistributionTariff | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -128,6 +157,7 @@ class Result:
             "tariff": asdict(self.tariff) | {"description": self.tariff.describe()},
             "fixed_tariff": asdict(self.fixed) if self.fixed else None,
             "low_tariff_schedule": self.low_tariff,
+            "distribution": asdict(self.distribution) if self.distribution else None,
             "summary": self.total.as_dict()
             | {
                 "avg_spot_time_weighted_czk_mwh": _r(self.avg_spot_time_czk_mwh, 2),
@@ -171,14 +201,19 @@ def compute(
     fixed: FixedTariff | None = None,
     breakdown: Breakdown = "none",
     low_tariff: LowTariffSchedule | None = None,
+    distribution: DistributionTariff | None = None,
 ) -> Result:
     """Price every reading inside local days ``start``..``end`` (inclusive).
 
     ``low_tariff`` (optional) tells which periods were low tariff (NT); it is needed when the
-    fixed comparison tariff has an NT price, and adds NT consumption to the results.
+    fixed comparison tariff or the distribution charges have an NT price, and adds NT
+    consumption to the results. ``distribution`` charges are computed once and reported
+    next to both the spot and the fixed totals (they are the same for both).
     """
     if fixed is not None and fixed.price_low_czk_kwh is not None and low_tariff is None:
         raise ValueError("A low-tariff (NT) price needs a low-tariff schedule.")
+    if distribution is not None and distribution.low_czk_kwh is not None and low_tariff is None:
+        raise ValueError("A low-tariff (NT) distribution charge needs a low-tariff schedule.")
     t0, t1 = local_day_bounds_utc(start, end)
     lookup = PriceLookup(prices)
     vat = tariff.vat_factor
@@ -201,7 +236,7 @@ def compute(
             continue
         n = max(1, round(r.length / QUARTER))
         slot_kwh = r.kwh / n
-        cost = spot_sum = neg = low = fixed_cost = 0.0
+        cost = spot_sum = neg = low = fixed_cost = dist_cost = 0.0
         priced_kwh = 0.0
         for k in range(n):
             slot = r.start + k * QUARTER
@@ -226,6 +261,10 @@ def compute(
                     else nt * frac + fixed.price_czk_kwh * (1 - frac)
                 )
                 fixed_cost += slot_kwh * unit
+            if distribution is not None:
+                dl = distribution.low_czk_kwh
+                hi = distribution.high_czk_kwh
+                dist_cost += slot_kwh * (hi if dl is None else dl * frac + hi * (1 - frac))
         if priced_kwh == 0 and r.kwh != 0:
             continue
         spot_avg = spot_sum / priced_kwh if priced_kwh else 0.0
@@ -243,6 +282,8 @@ def compute(
                 b.low_kwh = (b.low_kwh or 0.0) + low
             if fixed is not None:
                 b.fixed_czk = (b.fixed_czk or 0.0) + fixed_cost
+            if distribution is not None:
+                b.distribution_czk = (b.distribution_czk or 0.0) + dist_cost
 
     # fixed monthly fees, prorated per day
     for d, fee in _fee_by_day(start, end, tariff.monthly_fee).items():
@@ -255,6 +296,16 @@ def compute(
             if breakdown != "none":
                 b = buckets[key(d)]
                 b.fixed_czk = (b.fixed_czk or 0.0) + fee
+
+    if distribution is not None:
+        total.distribution_czk = total.distribution_czk or 0.0
+        for b in buckets.values():
+            b.distribution_czk = b.distribution_czk or 0.0
+        for d, fee in _fee_by_day(start, end, distribution.monthly_fee).items():
+            total.distribution_czk += fee
+            if breakdown != "none":
+                b = buckets[key(d)]
+                b.distribution_czk = (b.distribution_czk or 0.0) + fee
 
     if low_tariff is not None:
         total.low_kwh = total.low_kwh or 0.0
@@ -300,4 +351,5 @@ def compute(
         missing_price_kwh=missing_kwh,
         warnings=warnings,
         low_tariff=low_tariff.describe() if low_tariff is not None else None,
+        distribution=distribution,
     )

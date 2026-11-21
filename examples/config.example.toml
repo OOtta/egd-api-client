@@ -37,3 +37,9 @@ monthly_fee = 120
 # hours = "22:00-06:00,13:00-15:00"        # every day (local time)
 # hours_weekend = "00:00-08:00,12:00-20:00" # optional, Saturday and Sunday
 # holidays = "weekday"                       # or "sunday": holidays use the weekend hours
+
+# Your distribution charges – nothing is built in; CZK excl. VAT, added to spot and fixed.
+[distribution]
+# high_czk_kwh = 2.10       # per kWh in VT (all consumption if low_czk_kwh is not set)
+# low_czk_kwh = 0.45        # per kWh in NT; needs [low_tariff] hours
+# monthly_fee = 300         # circuit breaker etc., CZK/month

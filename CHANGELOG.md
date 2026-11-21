@@ -29,8 +29,11 @@ First version, published as **egd-api-client** (command `egd`).
 - `egd spot prices --currency czk|eur` (required); EUR uses OTE's own EUR prices in the hourly
   era as well.
 - `egd spot fx` gained `-o/--export` (CSV/JSON) and a summary, like `egd spot prices`.
-- Distribution fees are not computed: EG.D's OpenAPI provides no distribution rate, breaker
-  or fee data.
+- User-supplied distribution charges for both spot and fixed results:
+  `--distribution-high`, `--distribution-low` (needs `--low-tariff-hours`),
+  `--distribution-monthly-fee`, config `[distribution]`; report lines `Spot + distrib.` /
+  `Fixed + distrib.`, breakdown and export columns. EG.D's OpenAPI provides no distribution
+  rate, breaker or fee data and no price tables are built in.
 - CSV/XLSX consumption import with column, unit, timestamp-convention and DST detection.
 - Config file `~/.config/egd-api-client/config.toml` with `[egd]`, `[spot]`, `[spot.fixed]`
   sections; environment variables `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`,

@@ -34,6 +34,7 @@ class Config:
     spot: dict[str, Any] = field(default_factory=dict)  # [spot] – tariff defaults
     fixed: dict[str, Any] = field(default_factory=dict)  # [spot.fixed] – comparison tariff
     low_tariff: dict[str, Any] = field(default_factory=dict)  # [low_tariff] – NT periods
+    distribution: dict[str, Any] = field(default_factory=dict)  # [distribution] – user fees
     path: Path | None = None
     warnings: list[str] = field(default_factory=list)
 
@@ -73,6 +74,7 @@ KNOWN = {
     },
     "spot.fixed": {"price_czk_kwh", "price_low_czk_kwh", "monthly_fee"},
     "low_tariff": {"hours", "hours_weekend", "holidays"},
+    "distribution": {"high_czk_kwh", "low_czk_kwh", "monthly_fee"},
 }
 
 

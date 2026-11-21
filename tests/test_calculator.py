@@ -135,3 +135,53 @@ def test_fixed_vt_nt_split():
 
     with pytest.raises(ValueError, match="schedule"):
         compute(readings, prices, SpotTariff(), d, d, fixed=fixed)
+
+
+def _flat_day():
+    from datetime import UTC, date, datetime, timedelta
+
+    from egd_api_client.models import PricePoint, Reading
+
+    q = timedelta(minutes=15)
+    t0 = datetime(2026, 1, 4, 23, 0, tzinfo=UTC)  # Mon 5.1.2026 00:00 local
+    readings = [Reading(t0 + i * q, 1.0) for i in range(96)]
+    prices = [PricePoint(t0 + i * q, q, 1000.0) for i in range(96)]
+    return readings, prices, date(2026, 1, 5)
+
+
+def test_distribution_high_only_applies_to_all_consumption():
+    from egd_api_client.spot.calculator import compute
+    from egd_api_client.spot.tariff import DistributionTariff, FixedTariff, SpotTariff
+
+    readings, prices, d = _flat_day()
+    tariff = SpotTariff(vat_percent=21)
+    dist = DistributionTariff(1.5, None, 31.0)  # January: 31 days → 1 CZK for the day
+    res = compute(readings, prices, tariff, d, d, fixed=FixedTariff(3.0), distribution=dist)
+    t = res.total
+    assert t.distribution_czk == pytest.approx(96 * 1.5 + 1.0)
+    assert t.total_czk == pytest.approx(96 * 1.0 * 1.21)  # supplier part unchanged
+    assert t.total_with_distribution_czk == pytest.approx((96 * 1.0 + 145) * 1.21)
+    assert t.fixed_total_with_distribution_czk == pytest.approx((96 * 3.0 + 145) * 1.21)
+    assert t.savings_czk == pytest.approx((96 * 3.0 - 96 * 1.0) * 1.21)  # unaffected
+    out = res.as_dict()
+    assert out["distribution"] == {"high_czk_kwh": 1.5, "low_czk_kwh": None, "monthly_fee": 31.0}
+    assert out["summary"]["distribution_czk"] == pytest.approx(145)
+    assert out["summary"]["fixed_total_with_distribution_czk"] == pytest.approx(523.93)
+
+
+def test_distribution_vt_nt_split_needs_schedule():
+    from egd_api_client.lowtariff import LowTariffSchedule
+    from egd_api_client.spot.calculator import compute
+    from egd_api_client.spot.tariff import DistributionTariff, SpotTariff
+
+    readings, prices, d = _flat_day()
+    dist = DistributionTariff(2.0, 0.5)
+    sched = LowTariffSchedule.parse("22:00-06:00")
+    res = compute(readings, prices, SpotTariff(), d, d, low_tariff=sched, distribution=dist,
+                  breakdown="day")  # fmt: skip
+    # 8 NT hours = 32 kWh at 0.5, 64 kWh at 2.0
+    assert res.total.distribution_czk == pytest.approx(32 * 0.5 + 64 * 2.0)
+    assert res.buckets[0].distribution_czk == pytest.approx(144)
+    assert res.total.total_with_distribution_czk == pytest.approx(96 + 144)
+    with pytest.raises(ValueError, match="distribution"):
+        compute(readings, prices, SpotTariff(), d, d, distribution=dist)

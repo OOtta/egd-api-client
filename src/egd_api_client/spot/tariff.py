@@ -109,3 +109,28 @@ class FixedTariff:
         if self.monthly_fee:
             text += f" + {self.monthly_fee:g} CZK/month"
         return text
+
+
+@dataclass(frozen=True, slots=True)
+class DistributionTariff:
+    """User-supplied distribution charges, added to both the spot and the fixed result.
+
+    ``high_czk_kwh`` – per-kWh distribution charge in the high tariff (VT), or for all
+    consumption when ``low_czk_kwh`` is not given. ``low_czk_kwh`` – per-kWh charge in the
+    low tariff (NT); needs a low-tariff schedule. ``monthly_fee`` – fixed monthly charges
+    (circuit breaker etc.), prorated by days. All amounts in CZK excl. VAT; nothing is
+    built in – enter the values of your distribution rate.
+    """
+
+    high_czk_kwh: float
+    low_czk_kwh: float | None = None
+    monthly_fee: float = 0.0
+
+    def describe(self) -> str:
+        if self.low_czk_kwh is None:
+            text = f"{self.high_czk_kwh:g} CZK/kWh"
+        else:
+            text = f"VT {self.high_czk_kwh:g} / NT {self.low_czk_kwh:g} CZK/kWh"
+        if self.monthly_fee:
+            text += f" + {self.monthly_fee:g} CZK/month"
+        return text
