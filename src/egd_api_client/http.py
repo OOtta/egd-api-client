@@ -6,7 +6,7 @@ import requests
 
 from egd_api_client._version import __version__
 
-USER_AGENT = f"egd-api-client/{__version__} (+https://github.com/OWNER/egd-api-client)"
+USER_AGENT = f"egd-api-client/{__version__} (+https://github.com/OOtta/egd-api-client)"
 DEFAULT_TIMEOUT = 60
 
 

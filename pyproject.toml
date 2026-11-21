@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
-authors = [{ name = "egd-api-client contributors" }]
+authors = [{ name = "OOtta" }]
 keywords = ["electricity", "API client", "Distribuce24", "spot price", "OTE", "EGD", "E.ON Distribuce", "smart meter", "Czech"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -44,8 +44,8 @@ dev = [
 egd = "egd_api_client.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/OWNER/egd-api-client"
-Issues = "https://github.com/OWNER/egd-api-client/issues"
+Homepage = "https://github.com/OOtta/egd-api-client"
+Issues = "https://github.com/OOtta/egd-api-client/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/egd_api_client"]

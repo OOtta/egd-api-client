@@ -42,8 +42,8 @@ Stejné funkce jsou k dispozici jako knihovna (`egd_api_client.EgdClient`,
 Potřebujete Python 3.11 nebo novější. Doporučený způsob je [pipx](https://pipx.pypa.io):
 
 ```bash
-pipx install "git+https://github.com/OWNER/egd-api-client"                        # API + CSV
-pipx install "egd-api-client[xlsx] @ git+https://github.com/OWNER/egd-api-client"  # + vstup XLSX
+pipx install "git+https://github.com/OOtta/egd-api-client"                        # API + CSV
+pipx install "egd-api-client[xlsx] @ git+https://github.com/OOtta/egd-api-client"  # + vstup XLSX
 ```
 
 Z lokální kopie: `pipx install ".[xlsx]"` (pro vývoj `pip install -e ".[dev]"`).
