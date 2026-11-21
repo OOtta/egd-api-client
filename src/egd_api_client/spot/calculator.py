@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from typing import Literal
 
+from egd_api_client.lowtariff import LowTariffSchedule
 from egd_api_client.models import PricePoint, Reading
 from egd_api_client.spot.tariff import FixedTariff, SpotTariff
 from egd_api_client.timeutil import (
@@ -41,6 +42,7 @@ class Bucket:
     spot_weighted_sum: float = 0.0  # Σ kWh × spot CZK/MWh
     negative_kwh: float = 0.0
     fixed_czk: float | None = None  # comparison tariff incl. fee, excl. VAT
+    low_kwh: float | None = None  # consumption in low-tariff (NT) periods, if known
     vat_factor: float = 1.0
 
     @property
@@ -92,6 +94,8 @@ class Bucket:
             "avg_price_czk_kwh": _r(self.avg_price_czk_kwh, r),
             "negative_price_kwh": round(self.negative_kwh, 3),
         }
+        if self.low_kwh is not None:
+            out["low_tariff_kwh"] = round(self.low_kwh, 3)
         if self.fixed_czk is not None:
             out["fixed_total_czk"] = _r(self.fixed_total_czk, 2)
             out["savings_czk"] = _r(self.savings_czk, 2)
@@ -116,12 +120,14 @@ class Result:
     covered_intervals: int
     missing_price_kwh: float
     warnings: list[str] = field(default_factory=list)
+    low_tariff: str | None = None  # description of the NT schedule used
 
     def as_dict(self) -> dict:
         return {
             "period": {"from": self.start.isoformat(), "to": self.end.isoformat()},
             "tariff": asdict(self.tariff) | {"description": self.tariff.describe()},
             "fixed_tariff": asdict(self.fixed) if self.fixed else None,
+            "low_tariff_schedule": self.low_tariff,
             "summary": self.total.as_dict()
             | {
                 "avg_spot_time_weighted_czk_mwh": _r(self.avg_spot_time_czk_mwh, 2),
@@ -164,8 +170,15 @@ def compute(
     *,
     fixed: FixedTariff | None = None,
     breakdown: Breakdown = "none",
+    low_tariff: LowTariffSchedule | None = None,
 ) -> Result:
-    """Price every reading inside local days ``start``..``end`` (inclusive)."""
+    """Price every reading inside local days ``start``..``end`` (inclusive).
+
+    ``low_tariff`` (optional) tells which periods were low tariff (NT); it is needed when the
+    fixed comparison tariff has an NT price, and adds NT consumption to the results.
+    """
+    if fixed is not None and fixed.price_low_czk_kwh is not None and low_tariff is None:
+        raise ValueError("A low-tariff (NT) price needs a low-tariff schedule.")
     t0, t1 = local_day_bounds_utc(start, end)
     lookup = PriceLookup(prices)
     vat = tariff.vat_factor
@@ -188,7 +201,7 @@ def compute(
             continue
         n = max(1, round(r.length / QUARTER))
         slot_kwh = r.kwh / n
-        cost = spot_sum = neg = 0.0
+        cost = spot_sum = neg = low = fixed_cost = 0.0
         priced_kwh = 0.0
         for k in range(n):
             slot = r.start + k * QUARTER
@@ -203,6 +216,16 @@ def compute(
             priced_kwh += slot_kwh
             if p.czk_mwh < 0:
                 neg += slot_kwh
+            frac = low_tariff.low_fraction(slot, QUARTER) if low_tariff is not None else 0.0
+            low += slot_kwh * frac
+            if fixed is not None:
+                nt = fixed.price_low_czk_kwh
+                unit = (
+                    fixed.price_czk_kwh
+                    if nt is None
+                    else nt * frac + fixed.price_czk_kwh * (1 - frac)
+                )
+                fixed_cost += slot_kwh * unit
         if priced_kwh == 0 and r.kwh != 0:
             continue
         spot_avg = spot_sum / priced_kwh if priced_kwh else 0.0
@@ -216,8 +239,10 @@ def compute(
             b.energy_czk += cost
             b.spot_weighted_sum += spot_sum
             b.negative_kwh += neg
+            if low_tariff is not None:
+                b.low_kwh = (b.low_kwh or 0.0) + low
             if fixed is not None:
-                b.fixed_czk = (b.fixed_czk or 0.0) + priced_kwh * fixed.price_czk_kwh
+                b.fixed_czk = (b.fixed_czk or 0.0) + fixed_cost
 
     # fixed monthly fees, prorated per day
     for d, fee in _fee_by_day(start, end, tariff.monthly_fee).items():
@@ -230,6 +255,23 @@ def compute(
             if breakdown != "none":
                 b = buckets[key(d)]
                 b.fixed_czk = (b.fixed_czk or 0.0) + fee
+
+    if low_tariff is not None:
+        total.low_kwh = total.low_kwh or 0.0
+        for b in buckets.values():
+            b.low_kwh = b.low_kwh or 0.0
+        if low_tariff.uncovered:
+            days = sorted(low_tariff.uncovered)
+            msg = (
+                f"The low-tariff schedule has no data for {len(days)} day(s) "
+                f"({days[0]} – {days[-1]})"
+            )
+            if fixed is not None and fixed.price_low_czk_kwh is not None:
+                raise ValueError(
+                    msg + "; cannot price NT for them. Shorten the period or "
+                    "give the NT hours explicitly (--low-tariff-hours)."
+                )
+            warnings.append(msg + "; their consumption is counted as high tariff.")
 
     expected = int((t1 - t0) / QUARTER)
     if missing_kwh > 0:
@@ -269,4 +311,5 @@ def compute(
         covered_intervals=len(covered),
         missing_price_kwh=missing_kwh,
         warnings=warnings,
+        low_tariff=low_tariff.describe() if low_tariff is not None else None,
     )

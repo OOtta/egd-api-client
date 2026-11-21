@@ -70,7 +70,13 @@ class FakeOte:
             start = max(start, QUARTER_HOUR_MARKET_START)
             return 200, {}, ote_xml(start, end, self.price, quarter=True)
         end = min(end, QUARTER_HOUR_MARKET_START - timedelta(days=1))
-        return 200, {}, ote_xml(start, end, self.price, quarter=False)
+        price = self.price
+        if "<pub:InEur>true</pub:InEur>" in body:  # hourly era in EUR: synthetic rate 25
+
+            def price(d: date, i: int) -> float:
+                return self.price(d, i) / 25
+
+        return 200, {}, ote_xml(start, end, price, quarter=False)
 
 
 def cnb_text() -> str:

@@ -37,6 +37,9 @@ def render_summary(res: Result, out: TextIO) -> None:
     )
     if t.negative_kwh:
         w(f"At negative price: {fmt(t.negative_kwh, 3)} kWh\n")
+    if t.low_kwh is not None:
+        share = 100 * t.low_kwh / t.kwh if t.kwh else 0.0
+        w(f"Low tariff (NT):   {fmt(t.low_kwh, 3)} kWh ({share:.1f} %) – {res.low_tariff}\n")
     w("\n")
     w(f"Energy (spot):     {fmt(t.energy_czk)} CZK\n")
     if t.fee_czk:
@@ -48,12 +51,7 @@ def render_summary(res: Result, out: TextIO) -> None:
     w(" (incl. VAT)\n" if res.tariff.vat_percent else " (excl. VAT)\n")
     if res.fixed is not None:
         w("\n")
-        w(
-            f"Fixed tariff:      {fmt(t.fixed_total_czk)} CZK "
-            f"({res.fixed.price_czk_kwh:g} CZK/kWh"
-            + (f" + {res.fixed.monthly_fee:g} CZK/month" if res.fixed.monthly_fee else "")
-            + ")\n"
-        )
+        w(f"Fixed tariff:      {fmt(t.fixed_total_czk)} CZK ({res.fixed.describe()})\n")
         s = t.savings_czk or 0.0
         verdict = (
             "spot would have been CHEAPER by" if s > 0 else "spot would have been MORE EXPENSIVE by"
@@ -70,20 +68,27 @@ def render_breakdown(res: Result, out: TextIO) -> None:
     if not res.buckets:
         return
     fixed = res.fixed is not None
-    cols = ["Period", "kWh", "Spot avg", "Energy", "Fee", "Total", "CZK/kWh"]
+    low = res.total.low_kwh is not None
+    cols = (
+        ["Period", "kWh"]
+        + (["NT kWh"] if low else [])
+        + ["Spot avg", "Energy", "Fee", "Total", "CZK/kWh"]
+    )
     if fixed:
         cols += ["Fixed", "Saved"]
     rows = []
     for b in res.buckets:
-        row = [
-            b.label,
-            fmt(b.kwh, 3),
-            fmt(b.avg_spot_czk_mwh),
-            fmt(b.energy_czk),
-            fmt(b.fee_czk),
-            fmt(b.total_czk),
-            fmt(b.avg_price_czk_kwh, 4),
-        ]
+        row = (
+            [b.label, fmt(b.kwh, 3)]
+            + ([fmt(b.low_kwh, 3)] if low else [])
+            + [
+                fmt(b.avg_spot_czk_mwh),
+                fmt(b.energy_czk),
+                fmt(b.fee_czk),
+                fmt(b.total_czk),
+                fmt(b.avg_price_czk_kwh, 4),
+            ]
+        )
         if fixed:
             row += [fmt(b.fixed_total_czk), fmt(b.savings_czk)]
         rows.append(row)
@@ -133,14 +138,27 @@ def export_intervals(res: Result, path: Path) -> None:
             )
 
 
-def export_prices(points: Sequence[PricePoint], path: Path) -> None:
+def export_prices(points: Sequence[PricePoint], path: Path, currency: str = "czk") -> None:
+    """Export prices; the ``price`` column/field is in the chosen currency (per MWh).
+
+    ``eur_czk`` is the ČNB rate used for conversion (15-minute era) or empty when OTE
+    published both currencies itself (hourly era).
+    """
+    eur = currency == "eur"
+
+    def price(p: PricePoint) -> float:
+        v = p.eur_mwh if eur else p.czk_mwh
+        if v is None:
+            raise ValueError(f"no EUR price for {p.start}")
+        return v
+
+    unit = "eur_mwh" if eur else "czk_mwh"
     if path.suffix.lower() == ".json":
         data = [
             {
                 "start": to_local(p.start).isoformat(),
                 "minutes": int(p.length.total_seconds() // 60),
-                "czk_mwh": round(p.czk_mwh, 4),
-                "eur_mwh": p.eur_mwh,
+                unit: round(price(p), 4),
                 "eur_czk": p.eur_czk,
             }
             for p in points
@@ -149,14 +167,27 @@ def export_prices(points: Sequence[PricePoint], path: Path) -> None:
         return
     with path.open("w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh, lineterminator="\n")
-        w.writerow(["start", "minutes", "czk_mwh", "eur_mwh", "eur_czk"])
+        w.writerow(["start", "minutes", unit, "eur_czk"])
         for p in points:
             w.writerow(
                 [
                     to_local(p.start).isoformat(),
                     int(p.length.total_seconds() // 60),
-                    f"{p.czk_mwh:.4f}",
-                    "" if p.eur_mwh is None else f"{p.eur_mwh:.2f}",
+                    f"{price(p):.4f}" if not eur else f"{price(p):.2f}",
                     "" if p.eur_czk is None else f"{p.eur_czk:.3f}",
                 ]
             )
+
+
+def export_fx(rows: Sequence[dict], path: Path) -> None:
+    """Export per-day EUR/CZK rates (``day, eur_czk, fixing_date, note``)."""
+    if path.suffix.lower() == ".json":
+        path.write_text(json.dumps(list(rows), ensure_ascii=False, indent=1), encoding="utf-8")
+        return
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(
+            fh, fieldnames=["day", "eur_czk", "fixing_date", "note"], lineterminator="\n"
+        )
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: "" if v is None else v for k, v in r.items()})

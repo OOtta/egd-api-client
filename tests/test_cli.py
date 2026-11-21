@@ -130,7 +130,21 @@ def test_prices_command(mocked, tmp_path, capsys):
     add_ote(mocked, FakeOte(lambda d, i: float(i)))
     out = tmp_path / "p.csv"
     assert (
-        main(["spot", "prices", "--from", "2024-03-31", "--to", "2024-03-31", "-o", str(out)]) == 0
+        main(
+            [
+                "spot",
+                "prices",
+                "--currency",
+                "czk",
+                "--from",
+                "2024-03-31",
+                "--to",
+                "2024-03-31",
+                "-o",
+                str(out),
+            ]
+        )
+        == 0
     )
     assert "23 periods" in capsys.readouterr().out
     assert len(out.read_text().splitlines()) == 24
@@ -154,7 +168,10 @@ def test_data_command(mocked, monkeypatch, tmp_path):
 
 
 def test_bad_period(capsys, tmp_path):
-    assert main(["spot", "prices", "--from", "2025-02-01", "--to", "2025-01-01"]) == 2
+    assert (
+        main(["spot", "prices", "--currency", "czk", "--from", "2025-02-01", "--to", "2025-01-01"])
+        == 2
+    )
     assert "before" in capsys.readouterr().err
 
 
@@ -180,7 +197,9 @@ def test_data_production_json(mocked, monkeypatch, tmp_path):
 def test_spot_fx_command(capsys, mocked):
     add_cnb(mocked)
     assert main(["spot", "fx", "--from", "2025-09-27", "--to", "2025-10-28", "--json"]) == 0
-    rows = {r["day"]: r for r in json.loads(capsys.readouterr().out)}
+    out = json.loads(capsys.readouterr().out)
+    assert out["days"] == 32 and out["converted_days"] == 28
+    rows = {r["day"]: r for r in out["days_detail"]}
     assert rows["2025-09-27"]["eur_czk"] is None  # hourly era: OTE CZK prices used directly
     assert rows["2025-10-04"] == {
         "day": "2025-10-04",
@@ -190,3 +209,123 @@ def test_spot_fx_command(capsys, mocked):
     }
     assert rows["2025-10-28"]["fixing_date"] == "2025-10-27"
     assert rows["2025-10-27"]["fixing_date"] == "2025-10-27"
+
+
+def test_prices_currency_is_required(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["spot", "prices", "--from", "2025-09-30"])
+    assert exc.value.code == 2
+    assert "--currency" in capsys.readouterr().err
+
+
+def test_prices_eur_uses_ote_eur_values_in_both_eras(mocked, tmp_path, capsys):
+    add_cnb(mocked)
+    fake = FakeOte(lambda d, i: 2500.0 if d < date(2025, 10, 1) else 80.0)
+    add_ote(mocked, fake)
+    out = tmp_path / "p.csv"
+    argv = ["spot", "prices", "--currency", "eur", "--from", "2025-09-30", "--to", "2025-10-01"]
+    assert main([*argv, "--json", "-o", str(out)]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["unit"] == "EUR/MWh"
+    assert summary["min"] == pytest.approx(80.0) and summary["max"] == pytest.approx(100.0)
+    rows = out.read_text().splitlines()
+    assert rows[0] == "start,minutes,eur_mwh,eur_czk"
+    assert rows[1] == "2025-09-30T00:00:00+02:00,60,100.00,"  # OTE's own EUR (InEur=true)
+    assert rows[-1].endswith(",15,80.00,24.295")
+    assert ("GetDamPriceE", date(2025, 9, 30), date(2025, 9, 30)) in fake.calls
+
+
+def test_prices_czk_converts_15min_era(mocked, tmp_path, capsys):
+    add_cnb(mocked)
+    add_ote(mocked, FakeOte(lambda d, i: 2500.0 if d < date(2025, 10, 1) else 80.0))
+    out = tmp_path / "p.json"
+    argv = ["spot", "prices", "--currency", "czk", "--from", "2025-09-30", "--to", "2025-10-01"]
+    assert main([*argv, "-o", str(out)]) == 0
+    data = json.loads(out.read_text())
+    assert data[0] == {
+        "start": "2025-09-30T00:00:00+02:00",
+        "minutes": 60,
+        "czk_mwh": 2500.0,
+        "eur_czk": None,
+    }
+    assert data[-1]["czk_mwh"] == pytest.approx(80 * 24.295)
+
+
+def test_spot_fx_export(mocked, tmp_path, capsys):
+    add_cnb(mocked)
+    csv_out, json_out = tmp_path / "fx.csv", tmp_path / "fx.json"
+    argv = ["spot", "fx", "--from", "2025-10-24", "--to", "2025-10-28"]
+    assert main([*argv, "-o", str(csv_out)]) == 0
+    text = capsys.readouterr().out
+    assert "2025-10-28 Tue   24.325  2025-10-27" in text
+    assert "2 day(s) used an earlier fixing" not in text  # Sat, Sun and the holiday → 3
+    assert "3 day(s) used an earlier fixing" in text
+    lines = csv_out.read_text().splitlines()
+    assert lines[0] == "day,eur_czk,fixing_date,note"
+    assert lines[1] == "2025-10-24,24.34,2025-10-24,"
+    assert main([*argv, "-o", str(json_out)]) == 0
+    assert json.loads(json_out.read_text())[4]["fixing_date"] == "2025-10-27"
+
+
+def test_calc_fixed_vt_nt_with_manual_hours(mocked, tmp_path, capsys):
+    add_cnb(mocked)
+    add_ote(mocked, FakeOte(lambda d, i: 1000.0 if d < date(2025, 10, 1) else 40.0))
+    argv = ["spot", "calc", "-i", str(sample_csv(tmp_path)), "--json"]
+    argv += ["--fixed-price", "4", "--fixed-price-low", "2"]
+    argv += ["--low-tariff-hours", "22:00-06:00", "--low-tariff-hours-weekend", "00:00-24:00"]
+    assert main(argv) == 0
+    data = json.loads(capsys.readouterr().out)
+    # Tue 30.9. + Wed 1.10.: 8 NT hours a day → 2 × 8 kWh at 2 CZK, the rest at 4 CZK
+    assert data["summary"]["low_tariff_kwh"] == pytest.approx(16)
+    assert data["summary"]["fixed_total_czk"] == pytest.approx(16 * 2 + 32 * 4)
+    assert "NT 00:00–06:00, 22:00–24:00" in data["low_tariff_schedule"]
+
+
+def test_calc_nt_price_needs_schedule(capsys, tmp_path):
+    argv = ["spot", "calc", "-i", str(sample_csv(tmp_path)), "--fixed-price", "4"]
+    assert main([*argv, "--fixed-price-low", "2"]) == 2
+    assert "NT periods" in capsys.readouterr().err
+    assert main(["spot", "calc", "-i", str(sample_csv(tmp_path)), "--fixed-price-low", "2"]) == 2
+
+
+def test_calc_negative_coefficients(mocked, tmp_path, capsys):
+    add_cnb(mocked)
+    add_ote(mocked, FakeOte(lambda d, i: -100.0 if d < date(2025, 10, 1) else 40.0))
+    argv = ["spot", "calc", "-i", str(sample_csv(tmp_path)), "--to", "2025-09-30", "--json"]
+    argv += [
+        "-m",
+        "1.2",
+        "-a",
+        "400",
+        "--negative-multiplier",
+        "1",
+        "--negative-add-czk-mwh",
+        "500",
+    ]
+    assert main(argv) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["summary"]["energy_czk"] == pytest.approx(24 * (-100 + 500) / 1000)
+    assert data["tariff"]["negative_multiplier"] == 1.0
+
+
+def test_hdo_command(mocked, capsys):
+    from egd_api_client.lowtariff import HDO_REGION_URL, HDO_TIMES_URL
+    from test_lowtariff import HDO, REGIONS
+
+    mocked.add(responses.GET, HDO_TIMES_URL, json=HDO)
+    mocked.add(responses.GET, HDO_REGION_URL, json=REGIONS)
+    assert main(["hdo", "--hdo-code", "405", "--psc", "37001"]) == 0
+    out = capsys.readouterr().out
+    assert "valid every year 01.10.–31.03." in out and "Sun  00:00–24:00" in out
+    argv = ["hdo", "--hdo-code", "Cd56", "--hdo-relay", "D56d-relé2-TUV", "--json"]
+    assert main([*argv, "--from", "2026-08-31", "--to", "2026-09-01"]) == 0
+    days = json.loads(capsys.readouterr().out)["days"]
+    assert days[0]["windows"] is None and days[1] == {
+        "day": "2026-09-01",
+        "windows": "02:00–04:00",
+        "nt_hours": 2.0,
+    }
+    assert main(["hdo", "--list", "--hdo-region", "SM"]) == 0
+    assert capsys.readouterr().out.strip() == "SM\tCd56"
+    assert main(["hdo", "--hdo-code", "405"]) == 2
+    assert "several regions" in capsys.readouterr().err

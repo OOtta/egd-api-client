@@ -19,6 +19,8 @@ ean = "859182400xxxxxxxxx"
 # effective energy price = spot × multiplier + add_czk_mwh
 multiplier = 1.0
 add_czk_mwh = 400           # supplier margin in CZK/MWh (excl. VAT)
+# negative_multiplier = 1.0   # used when the spot price is negative (default: multiplier)
+# negative_add_czk_mwh = 0    # used when the spot price is negative (default: add_czk_mwh)
 monthly_fee = 0             # fixed supplier fee in CZK/month (excl. VAT)
 vat = 0                     # VAT in percent; 21 for the Czech standard rate
 negative = "as-is"          # "as-is" | "clamp-spot" | "clamp-total"
@@ -26,5 +28,17 @@ price_resolution = "auto"   # "auto" (15-min prices from 2025-10-01) | "hourly"
 
 # Optional comparison with a fixed-price product
 [spot.fixed]
-price_czk_kwh = 3.20        # excl. VAT
+price_czk_kwh = 3.20        # excl. VAT; the high-tariff (VT) price of a two-rate product
+# price_low_czk_kwh = 2.40  # low-tariff (NT) price; needs [low_tariff] below
 monthly_fee = 120
+
+# Low-tariff (NT) periods – EG.D's API does not provide them. Either an HDO code/command
+# (from the HDO receiver or the meter display; EG.D public data) ...
+[low_tariff]
+# hdo_code = "405"
+# psc = "37001"             # or hdo_region = "ZAPAD"; needed when the code is ambiguous
+# hdo_relay = "D25d"        # only if the code has several schedules (see `egd hdo`)
+# ... or explicit hours:
+# hours = "22:00-06:00,13:00-15:00"
+# hours_weekend = "00:00-08:00,12:00-20:00"
+# holidays = "auto"         # "sunday" | "weekday" | "auto"

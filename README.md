@@ -13,7 +13,9 @@ with it. The first feature built on top of the client is the **spot-tariff calcu
   converted with the official **ČNB** rate of each delivery day) and applies your supplier's
   formula – `spot × 1.15`, `spot + 400 CZK/MWh`, monthly fee, VAT – optionally per month or
   day and compared with a fixed-price tariff;
-* `egd spot prices`, `egd spot fx` – the prices and EUR/CZK rates themselves.
+* `egd spot prices`, `egd spot fx` – the prices (in CZK or EUR) and the EUR/CZK rates;
+* `egd hdo` – low-tariff (NT) times from EG.D's public HDO data, also usable for a
+  VT/NT fixed-price comparison in `egd spot calc`.
 
 The same functionality is available as a library (`egd_api_client.EgdClient`,
 `egd_api_client.spot`), so more features can be added as further sub-commands.
@@ -30,6 +32,8 @@ The same functionality is available as a library (`egd_api_client.EgdClient`,
 - [Using it as a library](#using-it-as-a-library)
 - [How the cost is calculated](#how-the-cost-is-calculated)
 - [EUR/CZK conversion](#eurczk-conversion)
+- [Low tariff (NT) and HDO](#low-tariff-nt-and-hdo)
+- [Distribution fees](#distribution-fees)
 - [Data sources](#data-sources)
 - [Input files](#input-files)
 - [Limitations](#limitations)
@@ -141,9 +145,10 @@ Metering data are never cached.
 | `egd meters` | list metering points available to your API credentials |
 | `egd profiles` | list EG.D profile codes |
 | `egd data` | download 15-minute consumption (`--kind consumption`, default) or production (`--kind production`) to CSV or JSON |
+| `egd hdo` | low-tariff (NT) times for an HDO code (EG.D public data) or a manual schedule; `--list` lists codes |
 | `egd spot calc` | compute the spot-tariff cost of your consumption (API or file) |
-| `egd spot prices` | download / summarise / export OTE spot prices |
-| `egd spot fx` | show the ČNB EUR/CZK rate applied to each delivery day |
+| `egd spot prices --currency czk\|eur` | download / summarise / export OTE spot prices (`-o .csv/.json`); `--currency` is required |
+| `egd spot fx` | the ČNB EUR/CZK rate applied to each delivery day (`-o .csv/.json`, `--json`) |
 
 Run `egd COMMAND --help` / `egd spot COMMAND --help` for all options. Common options:
 `--from`, `--to` (local Czech dates, inclusive; `YYYY-MM-DD` or `YYYY-MM` = whole month),
@@ -159,9 +164,15 @@ The most important options of `egd spot calc`:
 | `-a, --add-czk-mwh X` | fixed surcharge in CZK/MWh, e.g. `400` (negative values allowed) |
 | `--monthly-fee CZK` | supplier's fixed monthly fee (prorated by days) |
 | `--vat [PCT]` | add VAT; `--vat` alone means 21 % |
-| `--negative MODE` | negative price handling: `as-is` (default), `clamp-spot`, `clamp-total` |
+| `--negative-multiplier X` | multiplier for periods with a negative spot price (default: `-m`) |
+| `--negative-add-czk-mwh X` | surcharge for periods with a negative spot price (default: `-a`) |
+| `--negative MODE` | negative price handling: `as-is` (default), `clamp-spot`, `clamp-total` – see below |
 | `--price-resolution` | `auto` (15-min prices where they exist) or `hourly` |
-| `--fixed-price CZK_KWH` | compare with a fixed price per kWh (excl. VAT) |
+| `--fixed-price CZK_KWH` | compare with a fixed price per kWh (excl. VAT); the VT price of a two-rate product |
+| `--fixed-price-low CZK_KWH` | NT price of the fixed product; needs the NT periods (below) |
+| `--hdo-code CODE` (+ `--psc` / `--hdo-region`, `--hdo-relay`) | NT periods from EG.D's HDO data |
+| `--low-tariff-hours RANGES`, `--low-tariff-hours-weekend RANGES` | NT periods given by hand, e.g. `"22:00-06:00,13:00-15:00"` |
+| `--holidays auto\|sunday\|weekday` | whether public holidays follow the Sunday NT schedule |
 | `--fixed-monthly-fee CZK` | monthly fee of the fixed tariff |
 | `-b, --breakdown` | `none`, `month` or `day` |
 | `-o, --export FILE` | write the result to `.json` (full) or `.csv` (breakdown rows) |
@@ -188,9 +199,20 @@ egd spot calc -i export.xlsx -a 450 --price-resolution hourly
 # Never get paid for consumption at negative prices
 egd spot calc -i export.csv -a 400 --negative clamp-total
 
-# Just the prices, and the exchange rates used for them
-egd spot prices --from 2025-11 --export prices-2025-11.csv
-egd spot fx --from 2026-10-24 --to 2026-11-02
+# Supplier: spot × 1.15 + 400, but at negative prices only the spot itself
+egd spot calc -i export.csv -m 1.15 -a 400 --negative-multiplier 1 --negative-add-czk-mwh 0
+
+# Compare with a two-rate fixed product (VT 4.20 / NT 2.90 CZK/kWh) using your HDO code
+egd spot calc -i export.csv -a 400 --fixed-price 4.2 --fixed-price-low 2.9 \
+    --hdo-code 405 --psc 37001
+
+# Just the prices (currency must be chosen), and the exchange rates used for them
+egd spot prices --from 2025-11 --currency czk --export prices-2025-11.csv
+egd spot prices --from 2025-11 --currency eur --export prices-2025-11-eur.json
+egd spot fx --from 2026-10-24 --to 2026-11-02 -o fx.csv
+
+# Low-tariff times of an HDO code, day by day
+egd hdo --hdo-code 405 --psc 37001 --from 2026-11-16 --to 2026-11-22
 ```
 
 ## Using it as a library
@@ -218,6 +240,7 @@ For every 15-minute interval *i* with consumption *E<sub>i</sub>* (kWh) and day-
 
 ```
 price_i  = S_i × multiplier + add_czk_mwh            [CZK/MWh, excl. VAT]
+           (S_i < 0: negative_multiplier / negative_add_czk_mwh, if set)
 energy   = Σ E_i × price_i / 1000                    [CZK]
 fees     = monthly_fee × (days in period / days in month), summed per month
 total    = (energy + fees) × (1 + VAT/100)
@@ -228,10 +251,22 @@ effective price = total / Σ E_i                      [CZK/kWh]
   prices; each 15-minute consumption value uses the price of its hour. Since 1 Oct 2025 the
   15-minute price is used (or the hourly one with `--price-resolution hourly`). Hourly
   consumption data is split evenly into quarter-hours.
-* **Negative prices.** `as-is` applies the formula unchanged, so a negative spot price
-  reduces your bill (and a multiplier > 1 amplifies the credit). `clamp-spot` treats negative
-  spot prices as 0 (you still pay the surcharge). `clamp-total` floors the final energy price
-  at 0. Check your supplier's terms – they differ.
+* **Negative prices.** Some suppliers use other coefficients when the spot price is
+  negative: `--negative-multiplier` / `--negative-add-czk-mwh` (config `[spot]`
+  `negative_multiplier` / `negative_add_czk_mwh`). Each one that is not set falls back to
+  the normal `-m` / `-a`. The pair is chosen by the sign of the raw OTE price (strictly
+  below 0), *before* any clamping. Then `--negative` decides:
+  * `as-is` (default) – `S × neg_mult + neg_add`; a negative spot price reduces your bill
+    (a multiplier > 1 amplifies the credit);
+  * `clamp-spot` – the negative spot is set to 0 *before* the coefficients, so the price is
+    `neg_add` (you still pay the surcharge for negative-price periods);
+  * `clamp-total` – `S × neg_mult + neg_add`, floored at 0 (you never get paid for
+    consuming).
+
+  Check your supplier's terms – they differ.
+* **Fixed VT/NT comparison.** With `--fixed-price-low`, each 15-minute interval is priced at
+  the NT price for the part of it that falls into a low-tariff window and at the VT price
+  (`--fixed-price`) for the rest; the NT consumption is shown in the report (`NT kWh`).
 * **What is not included.** Distribution and other regulated charges (EG.D distribution
   fee, reserved capacity / circuit breaker fee, system services, POZE, electricity tax,
   OTE fee) are the same whichever supplier you choose, so they are left out. If you want an
@@ -243,6 +278,17 @@ effective price = total / Σ E_i                      [CZK/kWh]
   warnings (e.g. the 4 July 2025 emergency state, when OTE published no prices for 12 hours).
 
 ## EUR/CZK conversion
+
+`egd spot prices` makes you choose the currency (`--currency czk|eur` is required):
+
+* `czk` – hourly era (until 30 Sep 2025): OTE's own CZK prices; 15-minute era: OTE's EUR
+  prices × the ČNB rate of the delivery day (below);
+* `eur` – OTE's own EUR prices in both eras. For the hourly era they are downloaded
+  separately (`GetDamPriceE` with `InEur=true`), not converted back from CZK.
+
+The export's `eur_czk` column shows the ČNB rate applied (empty where OTE published the
+price in that currency itself).
+
 
 Since 1 Oct 2025 OTE publishes day-ahead prices in EUR only, so they have to be converted.
 The tool uses the **ČNB rate valid for the delivery day**:
@@ -261,6 +307,49 @@ no difference (a "previous business day" rule would differ on most days).
 every run, so a rate is never "frozen" in the cache. The fixing of a business day exists
 only after ~14:30 that day; until then (and for tomorrow's prices, which OTE publishes
 around 13:00) the last available fixing is used, which makes such figures provisional.
+
+## Low tariff (NT) and HDO
+
+**What EG.D's OpenAPI offers:** nothing about tariffs. Checked against the live API with a
+type B metering point (Nov 2026): `/rest/om` returns only `ean` and `typMereni`, the profile
+list has no VT/NT split for A/B meters, and there are no HDO, distribution-rate or
+circuit-breaker endpoints. The legacy smart-meter endpoint (`/rest/c/…`) lists VT/NT register
+profiles ("Stav číselníku spotřeby VT/NT", "Spotřeba energie vysoký/nízký tarif"), but they
+are for C1 smart meters only (an A/B point is refused). `egd spot calc` doesn't use them yet.
+
+**Where NT periods come from instead:**
+
+1. **EG.D's public HDO data** – `https://hdo.distribuce24.cz/casy` (the data behind
+   egd.cz → *Časy platnosti nízkého tarifu*; no login) and `…/region` (postcode → region).
+   Give the code/command from your HDO receiver, or from the display of an interval (A/B)
+   or smart meter, which control the tariff internally: `--hdo-code 405`, `A1B4DP6`,
+   `PH20_1`, `Cd56`, `d57` … If the code exists in several regions add `--psc` or
+   `--hdo-region`. If it has several relay schedules, add `--hdo-relay` (`egd hdo` lists
+   them). Matching is case-insensitive; `-` and `_` are treated alike.
+2. **A manual schedule** – `--low-tariff-hours "22:00-06:00,13:00-15:00"` (ranges may
+   cross midnight; boundaries need not be on quarter-hours), optionally
+   `--low-tariff-hours-weekend` for Saturday and Sunday.
+
+Both can also be set in the `[low_tariff]` config section. **Public holidays** use the
+Sunday windows with `--holidays sunday` and their weekday with `weekday`. `auto`, the
+default, means Sunday for classic HDO regions (`ZAPAD`, `VYCHOD`, `VERSACOM`) and weekday
+for smart/TOU commands and manual schedules. This follows the convention used by the
+community Home Assistant integration for this data; EG.D does not document it in the data.
+
+**Limitation:** EG.D publishes the *current* schedules only. These are yearly patterns
+(e.g. "every year 01.10.–31.03.") plus dated records (e.g. 01.09.2026–25.10.2026), with no
+history. Yearly patterns are applied to past years as published. For days no record covers,
+a VT/NT price comparison stops with an error (shorten the period or give
+`--low-tariff-hours`); without an NT price only a warning is shown. If your NT times
+changed in the past, use the manual schedule for those periods.
+
+## Distribution fees
+
+EG.D's OpenAPI doesn't provide distribution tariff data: no distribution rate (D02d,
+D25d, …), no circuit-breaker size and no fees. That means no total including
+distributor fees is calculated; the tool deliberately does not hard-code ERÚ's regulated
+price tables. If you want an all-in figure, add the per-MWh components to `--add-czk-mwh` and
+the monthly ones to `--monthly-fee`.
 
 ## Data sources
 
@@ -339,8 +428,9 @@ Project layout:
 src/egd_api_client/
   client.py          EG.D OpenAPI client (token, metering points, profiles, readings)
   readings_io.py     CSV/XLSX import, canonical CSV / JSON export
+  lowtariff.py       NT schedules, EG.D public HDO data, Czech public holidays
   models.py          Reading, PricePoint, LoadResult
-  cli.py             `egd` entry point and core commands (meters, profiles, data)
+  cli.py             `egd` entry point and core commands (meters, profiles, data, hdo)
   cli_common.py      shared CLI options, period handling, context
   config.py, cache.py, timeutil.py, http.py
   spot/              spot-tariff feature (`egd spot …`)
@@ -381,8 +471,9 @@ cena = spot × koeficient + přirážka [Kč/MWh]   (+ měsíční poplatek, + D
 | `egd meters` | seznam odběrných míst (EAN) dostupných pro vaše přihlašovací údaje |
 | `egd data` | export čtvrthodinové spotřeby (`--kind consumption`) nebo výroby (`--kind production`) |
 | `egd spot calc` | výpočet ceny se spotovým tarifem |
-| `egd spot prices` | spotové ceny OTE |
-| `egd spot fx` | kurz EUR/CZK použitý pro každý den |
+| `egd spot prices --currency czk\|eur` | spotové ceny OTE v CZK nebo EUR (měnu je nutné zvolit), export `-o .csv/.json` |
+| `egd spot fx` | kurz EUR/CZK použitý pro každý den, export `-o .csv/.json` |
+| `egd hdo` | časy nízkého tarifu (NT) podle kódu HDO z veřejných dat EG.D |
 
 Příklad – dodavatel účtuje `spot × 1,15 + 400 Kč/MWh`, 99 Kč měsíčně, s DPH 21 %, porovnání
 s fixní cenou 3,20 Kč/kWh:
@@ -393,7 +484,8 @@ egd spot calc --ean 859182400xxxxxxxxx --from 2025-01 --to 2025-12 \
     -m 1.15 -a 400 --monthly-fee 99 --vat --fixed-price 3.2 --breakdown month
 ```
 
-Konfigurace: `~/.config/egd-api-client/config.toml` (sekce `[egd]`, `[spot]`, `[spot.fixed]`),
+Konfigurace: `~/.config/egd-api-client/config.toml` (sekce `[egd]`, `[spot]`, `[spot.fixed]`,
+`[low_tariff]`),
 proměnné prostředí `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`.
 
 **Přístup k API:** na [portal.distribuce24.cz](https://portal.distribuce24.cz) →
@@ -401,8 +493,19 @@ proměnné prostředí `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`.
 Funguje pro odběrná místa s měřením A, B a C1 (aktivní chytrý elektroměr). Bez API můžete
 použít export z portálu: `egd spot calc --input export.xlsx ...`.
 
-**Záporné ceny:** `--negative as-is` (výchozí, vzorec beze změny – záporná cena snižuje
-účet), `clamp-spot` (záporný spot = 0), `clamp-total` (výsledná cena nikdy pod 0).
+**Záporné ceny:** pro období se záporným spotem lze zadat vlastní násobek a přirážku
+(`--negative-multiplier`, `--negative-add-czk-mwh`); co není zadáno, převezme se z `-m` / `-a`.
+Pak `--negative as-is` (výchozí, vzorec beze změny – záporná cena snižuje účet),
+`clamp-spot` (záporný spot se nejdřív nahradí nulou, platí se tedy jen přirážka pro záporné
+ceny), `clamp-total` (výsledná cena nikdy pod 0).
+
+**Fixní cena VT/NT:** `--fixed-price` (VT) a `--fixed-price-low` (NT). API EG.D časy NT
+neposkytuje (ani sazbu, HDO, jistič). Berou se proto z veřejných dat HDO EG.D podle kódu
+z přijímače HDO / displeje elektroměru (`--hdo-code 405 --psc 37001`), nebo je zadáte
+ručně (`--low-tariff-hours "22:00-06:00"`). EG.D zveřejňuje jen aktuální rozpisy (roční
+vzory a datované záznamy), ne historii. Dny bez rozpisu výpočet s NT cenou odmítne.
+
+**Poplatky distributora:** API je neposkytuje, celková cena s distribucí se proto nepočítá.
 
 **Nezahrnuto:** regulované platby za distribuci (distribuční poplatek, jistič, systémové
 služby, POZE, daň z elektřiny) – ty jsou stejné u každého dodavatele. Chcete-li celkovou

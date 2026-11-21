@@ -5,7 +5,8 @@ Manual:  https://www.ote-cr.cz/cs/dokumentace/xsd-wsdl-manual-pubweb
          (``uzivatelsky-manual_webove_sluzby_ote_k.pdf``)
 
 * Delivery days up to 2025-09-30: ``GetDamPriceE`` – hourly prices; ``InEur=false`` returns
-  OTE's official CZK/MWh values directly.
+  OTE's official CZK/MWh values directly, ``InEur=true`` OTE's EUR/MWh values (fetched only
+  when EUR output is requested).
 * Delivery days from 2025-10-01 (15-minute day-ahead market): ``GetDamPricePeriodE`` with
   ``PeriodResolution=PT15M`` – 15-minute ``Price`` and the hourly ``HourlyPrice`` in EUR/MWh.
   Converted to CZK with the ČNB fixing for the delivery day (see :mod:`egd_api_client.spot.cnb`).
@@ -152,6 +153,35 @@ class OteClient:
             rows.sort(key=lambda r: r["i"])
         return out
 
+    def _add_eur(self, by_day: dict[date, list[dict]]) -> None:
+        """Add OTE's own EUR prices (``InEur=true``) to hourly-era rows that lack them."""
+        need = sorted(
+            d
+            for d, rows in by_day.items()
+            if d < QUARTER_HOUR_MARKET_START and any("eur" not in r for r in rows)
+        )
+        dirty: dict[str, dict] = {}
+        for a, b in _chunks(need):
+            items = self._call(
+                "GetDamPriceE",
+                {"StartDate": a.isoformat(), "EndDate": b.isoformat(), "InEur": "true"},
+            )
+            eur: dict[tuple[str, int], float | None] = {
+                (it["Date"], int(it["Hour"])): float(it["Price"]) if it.get("Price") else None
+                for it in items
+            }
+            for d in iter_days(a, b):
+                rows = by_day.get(d, [])
+                for r in rows:
+                    r["eur"] = eur.get((d.isoformat(), r["i"]))
+                if _complete(len(rows), False):
+                    mk = f"{d.year:04d}-{d.month:02d}"
+                    month = dirty.setdefault(mk, self.cache.get("ote", mk) or {})
+                    if d.isoformat() in month:
+                        month[d.isoformat()] = rows
+        for mk, month in dirty.items():
+            self.cache.set("ote", mk, month)
+
     def day_rows(self, days: list[date]) -> dict[date, list[dict]]:
         """Rows per day, from cache where possible. Days without published prices are omitted."""
         result: dict[date, list[dict]] = {}
@@ -186,15 +216,25 @@ class OteClient:
 
     # -- public API -------------------------------------------------------------------------
     def prices(
-        self, start: date, end_inclusive: date, resolution: PriceResolution = "auto"
+        self,
+        start: date,
+        end_inclusive: date,
+        resolution: PriceResolution = "auto",
+        *,
+        with_eur: bool = False,
     ) -> list[PricePoint]:
-        """Price points (CZK/MWh) covering local delivery days ``start``..``end_inclusive``.
+        """Price points covering local delivery days ``start``..``end_inclusive``.
+
+        ``czk_mwh`` is always set. ``eur_mwh`` is set for the 15-minute era (OTE publishes
+        EUR) and, with ``with_eur=True``, also for the hourly era (OTE's own EUR values).
 
         ``auto``   – 15-minute prices where the market had them (from 2025-10-01), else hourly.
         ``hourly`` – always hourly prices (OTE's ``HourlyPrice`` for the 15-minute era).
         """
         days = list(iter_days(start, end_inclusive))
         by_day = self.day_rows(days)
+        if with_eur:
+            self._add_eur(by_day)
         points: list[PricePoint] = []
         for d in days:
             rows = by_day.get(d)
@@ -206,7 +246,8 @@ class OteClient:
             if d < QUARTER_HOUR_MARKET_START:
                 for r in rows:
                     if r["czk"] is not None:
-                        points.append(PricePoint(period_start_utc(d, r["i"], HOUR), HOUR, r["czk"]))
+                        start_utc = period_start_utc(d, r["i"], HOUR)
+                        points.append(PricePoint(start_utc, HOUR, r["czk"], r.get("eur")))
                 continue
             rate = self.cnb.eur_czk(d)
             if resolution == "hourly":

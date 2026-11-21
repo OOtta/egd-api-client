@@ -12,9 +12,11 @@ from typing import Any
 from egd_api_client.cli_common import (
     CliError,
     Context,
+    build_low_tariff,
     clamp_to_yesterday,
     first,
     info,
+    low_tariff_parser,
     resolve_period,
     warn,
 )
@@ -24,6 +26,7 @@ from egd_api_client.spot.calculator import compute
 from egd_api_client.spot.cnb import CnbRates
 from egd_api_client.spot.ote import QUARTER_HOUR_MARKET_START, OteClient
 from egd_api_client.spot.report import (
+    export_fx,
     export_intervals,
     export_prices,
     export_result,
@@ -60,7 +63,17 @@ def build_tariff(args: argparse.Namespace, cfg: Config) -> SpotTariff:
         monthly_fee=float(first(args.monthly_fee, t.get("monthly_fee"), 0.0)),
         vat_percent=float(vat or 0.0),
         negative=first(args.negative, t.get("negative"), "as-is"),
+        negative_multiplier=_opt_float(
+            first(args.negative_multiplier, t.get("negative_multiplier"))
+        ),
+        negative_add_czk_mwh=_opt_float(
+            first(args.negative_add_czk_mwh, t.get("negative_add_czk_mwh"))
+        ),
     )
+
+
+def _opt_float(v: object) -> float | None:
+    return None if v is None else float(v)  # type: ignore[arg-type]
 
 
 def build_fixed(args: argparse.Namespace, cfg: Config) -> FixedTariff | None:
@@ -68,7 +81,8 @@ def build_fixed(args: argparse.Namespace, cfg: Config) -> FixedTariff | None:
     if price is None:
         return None
     fee = first(args.fixed_monthly_fee, cfg.fixed.get("monthly_fee"), 0.0)
-    return FixedTariff(float(price), float(fee))
+    low = _opt_float(first(args.fixed_price_low, cfg.fixed.get("price_low_czk_kwh")))
+    return FixedTariff(float(price), float(fee), low)
 
 
 def file_options(args: argparse.Namespace) -> FileOptions:
@@ -89,6 +103,16 @@ def cmd_calc(args: argparse.Namespace) -> int:
     ctx = SpotContext(args)
     tariff = build_tariff(args, ctx.cfg)
     fixed = build_fixed(args, ctx.cfg)
+    if fixed is None and args.fixed_price_low is not None:
+        raise CliError("--fixed-price-low needs --fixed-price (the high-tariff price) as well.")
+    low_tariff = build_low_tariff(args, ctx)
+    if fixed is not None and fixed.price_low_czk_kwh is not None and low_tariff is None:
+        raise CliError(
+            "A low-tariff price needs the NT periods: give --hdo-code (with --psc / "
+            "--hdo-region if needed) or --low-tariff-hours. EG.D's API does not provide them."
+        )
+    if low_tariff is not None:
+        info(f"Low-tariff periods: {low_tariff.describe()}", args.json)
 
     if args.input:
         data = load_file(Path(args.input), file_options(args))
@@ -112,7 +136,19 @@ def cmd_calc(args: argparse.Namespace) -> int:
         raise CliError("No spot prices available for the selected period.")
     ctx.warn_unpriced()
 
-    res = compute(data.readings, prices, tariff, start, end, fixed=fixed, breakdown=args.breakdown)
+    try:
+        res = compute(
+            data.readings,
+            prices,
+            tariff,
+            start,
+            end,
+            fixed=fixed,
+            breakdown=args.breakdown,
+            low_tariff=low_tariff,
+        )
+    except ValueError as exc:
+        raise CliError(str(exc)) from exc
     for w in res.warnings:
         warn(w)
 
@@ -133,39 +169,43 @@ def cmd_calc(args: argparse.Namespace) -> int:
 def cmd_prices(args: argparse.Namespace) -> int:
     ctx = SpotContext(args)
     start, end = resolve_period(args)
-    points = ctx.ote.prices(start, end, args.price_resolution or "auto")
+    eur = args.currency == "eur"
+    points = ctx.ote.prices(start, end, args.price_resolution or "auto", with_eur=eur)
     if not points:
         raise CliError("No spot prices available for the selected period.")
     ctx.warn_unpriced()
-    vals = [p.czk_mwh for p in points]
-    neg = sum(1 for v in vals if v < 0)
+    unit = "EUR/MWh" if eur else "CZK/MWh"
+    vals = [p.eur_mwh if eur else p.czk_mwh for p in points]
+    if any(v is None for v in vals):  # pragma: no cover - OTE publishes EUR for every price
+        raise CliError("OTE did not publish EUR prices for part of the period.")
+    nums = [float(v) for v in vals if v is not None]
+    neg = sum(1 for v in nums if v < 0)
     summary = {
         "from": start.isoformat(),
         "to": end.isoformat(),
+        "currency": args.currency.upper(),
+        "unit": unit,
         "points": len(points),
-        "avg_czk_mwh": round(sum(vals) / len(vals), 2),
-        "min_czk_mwh": round(min(vals), 2),
-        "max_czk_mwh": round(max(vals), 2),
+        "avg": round(sum(nums) / len(nums), 2),
+        "min": round(min(nums), 2),
+        "max": round(max(nums), 2),
         "negative_points": neg,
     }
     if args.json:
         print(json.dumps(summary, indent=2))
     else:
-        print(f"Spot prices {start} – {end}: {len(points)} periods")
-        print(f"  average {fmt(summary['avg_czk_mwh'])} CZK/MWh")
-        print(f"  min     {fmt(summary['min_czk_mwh'])} CZK/MWh")
-        print(f"  max     {fmt(summary['max_czk_mwh'])} CZK/MWh")
+        print(f"Spot prices {start} – {end}: {len(points)} periods ({unit})")
+        print(f"  average {fmt(summary['avg'])} {unit}")
+        print(f"  min     {fmt(summary['min'])} {unit}")
+        print(f"  max     {fmt(summary['max'])} {unit}")
         print(f"  negative periods: {neg}")
     if args.export:
-        export_prices(points, Path(args.export))
+        export_prices(points, Path(args.export), currency=args.currency)
         info(f"Wrote {args.export}", args.json)
     return 0
 
 
-def cmd_fx(args: argparse.Namespace) -> int:
-    """List the EUR/CZK rate applied to each delivery day."""
-    ctx = SpotContext(args)
-    start, end = resolve_period(args)
+def fx_rows(cnb: CnbRates, start: date, end: date) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for d in iter_days(start, end):
         if d < QUARTER_HOUR_MARKET_START:
@@ -178,7 +218,7 @@ def cmd_fx(args: argparse.Namespace) -> int:
                 }
             )
             continue
-        fixing_day, rate = ctx.cnb.fixing(d)
+        fixing_day, rate = cnb.fixing(d)
         rows.append(
             {
                 "day": d.isoformat(),
@@ -187,14 +227,42 @@ def cmd_fx(args: argparse.Namespace) -> int:
                 "note": "" if fixing_day == d else "no fixing that day → last fixing before",
             }
         )
+    return rows
+
+
+def cmd_fx(args: argparse.Namespace) -> int:
+    """EUR/CZK rate applied to each delivery day (same output options as ``prices``)."""
+    ctx = SpotContext(args)
+    start, end = resolve_period(args)
+    rows = fx_rows(ctx.cnb, start, end)
+    rates = [r["eur_czk"] for r in rows if r["eur_czk"] is not None]
+    summary: dict[str, Any] = {
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "days": len(rows),
+        "converted_days": len(rates),
+        "days_with_earlier_fixing": sum(1 for r in rows if r["note"].startswith("no fixing")),
+        "avg_eur_czk": round(sum(rates) / len(rates), 4) if rates else None,
+        "min_eur_czk": min(rates) if rates else None,
+        "max_eur_czk": max(rates) if rates else None,
+    }
     if args.json:
-        print(json.dumps(rows, indent=2))
-        return 0
-    print("delivery day     EUR/CZK  ČNB fixing of")
-    for r in rows:
-        day = date.fromisoformat(r["day"])
-        rate = "–" if r["eur_czk"] is None else f"{r['eur_czk']:.3f}"
-        print(f"{r['day']} {day:%a}  {rate:>7}  {r['fixing_date'] or '–'}  {r['note']}")
+        print(json.dumps(summary | {"days_detail": rows}, ensure_ascii=False, indent=2))
+    else:
+        print("delivery day     EUR/CZK  ČNB fixing of")
+        for r in rows:
+            day = date.fromisoformat(r["day"])
+            rate = "–" if r["eur_czk"] is None else f"{r['eur_czk']:.3f}"
+            print(f"{r['day']} {day:%a}  {rate:>7}  {r['fixing_date'] or '–':<10}  {r['note']}")
+        if rates:
+            print(
+                f"\n{len(rates)} converted day(s): average {summary['avg_eur_czk']:.3f}, "
+                f"min {summary['min_eur_czk']:.3f}, max {summary['max_eur_czk']:.3f} CZK/EUR; "
+                f"{summary['days_with_earlier_fixing']} day(s) used an earlier fixing"
+            )
+    if args.export:
+        export_fx(rows, Path(args.export))
+        info(f"Wrote {args.export}", args.json)
     return 0
 
 
@@ -217,7 +285,7 @@ def register(
 
     c = ssub.add_parser(
         "calc",
-        parents=[common, period, egd],
+        parents=[common, period, egd, low_tariff_parser()],
         help="compute the cost of your consumption on a spot tariff",
         description="Compute the cost of your consumption on a spot tariff. Consumption comes "
         "from the EG.D API (--ean / EGD_EAN) or from a file (--input).",
@@ -260,9 +328,22 @@ def register(
         help="add VAT (default 21 %% when given without a value)",
     )
     t.add_argument(
+        "--negative-multiplier",
+        type=float,
+        metavar="X",
+        help="multiplier used when the spot price is negative (default: same as -m)",
+    )
+    t.add_argument(
+        "--negative-add-czk-mwh",
+        type=float,
+        metavar="CZK",
+        help="surcharge used when the spot price is negative (default: same as -a)",
+    )
+    t.add_argument(
         "--negative",
         choices=["as-is", "clamp-spot", "clamp-total"],
-        help="treatment of negative spot prices (default: as-is)",
+        help="treatment of negative spot prices (default: as-is); clamp-spot sets the spot to "
+        "0 before the coefficients, clamp-total floors the resulting price at 0",
     )
     t.add_argument(
         "--price-resolution",
@@ -275,7 +356,14 @@ def register(
         "--fixed-price",
         type=float,
         metavar="CZK_KWH",
-        help="compare with a fixed price per kWh (excl. VAT)",
+        help="compare with a fixed price per kWh (excl. VAT); the high-tariff (VT) price "
+        "of a two-rate product",
+    )
+    f.add_argument(
+        "--fixed-price-low",
+        type=float,
+        metavar="CZK_KWH",
+        help="low-tariff (NT) price of the fixed product (excl. VAT); needs the NT periods",
     )
     f.add_argument(
         "--fixed-monthly-fee", type=float, metavar="CZK", help="monthly fee of the fixed tariff"
@@ -288,6 +376,13 @@ def register(
     c.set_defaults(func=cmd_calc)
 
     pr = ssub.add_parser("prices", parents=[common, period], help="download/show OTE spot prices")
+    pr.add_argument(
+        "--currency",
+        choices=["czk", "eur"],
+        required=True,
+        help="czk: OTE's CZK prices (hourly era) / EUR × ČNB rate of the day (15-min era); "
+        "eur: OTE's own EUR prices in both eras",
+    )
     pr.add_argument("--price-resolution", choices=["auto", "hourly"])
     pr.add_argument("-o", "--export", metavar="FILE", help="write prices to .csv or .json")
     pr.set_defaults(func=cmd_prices)
@@ -297,4 +392,5 @@ def register(
         parents=[common, period],
         help="show the ČNB EUR/CZK rate applied to each delivery day",
     )
+    fx.add_argument("-o", "--export", metavar="FILE", help="write the rates to .csv or .json")
     fx.set_defaults(func=cmd_fx)

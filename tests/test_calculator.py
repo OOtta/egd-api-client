@@ -110,3 +110,36 @@ def test_readings_outside_period_ignored():
     outside = Reading(datetime(2025, 11, 5, tzinfo=UTC), 100.0)
     res = compute([*flat_readings(DAY, 0.1), outside], prices, SpotTariff(), DAY, DAY)
     assert res.total.kwh == pytest.approx(9.6)
+
+
+def test_fixed_vt_nt_split_and_uncovered_days():
+    from datetime import UTC, date, datetime, timedelta
+
+    from egd_api_client.lowtariff import LowTariffSchedule, Validity, WeeklySchedule
+    from egd_api_client.models import PricePoint, Reading
+    from egd_api_client.spot.calculator import compute
+    from egd_api_client.spot.tariff import FixedTariff, SpotTariff
+
+    q = timedelta(minutes=15)
+    t0 = datetime(2026, 1, 4, 23, 0, tzinfo=UTC)  # Mon 5.1.2026 00:00 local
+    readings = [Reading(t0 + i * q, 1.0) for i in range(96)]
+    prices = [PricePoint(t0 + i * q, q, 1000.0) for i in range(96)]
+    nt = WeeklySchedule.uniform("00:00-06:00")
+    sched = LowTariffSchedule([(None, nt)], source="test")
+    fixed = FixedTariff(4.0, 0.0, 2.0)
+    d = date(2026, 1, 5)
+    res = compute(readings, prices, SpotTariff(), d, d, fixed=fixed, low_tariff=sched)
+    assert res.total.low_kwh == pytest.approx(24)
+    assert res.total.fixed_czk == pytest.approx(24 * 2 + 72 * 4)
+    assert res.as_dict()["summary"]["low_tariff_kwh"] == 24
+
+    with pytest.raises(ValueError, match="schedule"):
+        compute(readings, prices, SpotTariff(), d, d, fixed=fixed)
+
+    dated = LowTariffSchedule([(Validity((2, 1), (2, 28), (2026, 2026)), nt)])
+    with pytest.raises(ValueError, match="no data for 1 day"):
+        compute(readings, prices, SpotTariff(), d, d, fixed=fixed, low_tariff=dated)
+    # without an NT price it is only a warning
+    dated.uncovered.clear()
+    res = compute(readings, prices, SpotTariff(), d, d, low_tariff=dated)
+    assert any("no data" in w for w in res.warnings)

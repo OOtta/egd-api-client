@@ -18,6 +18,19 @@ First version, published as **egd-api-client** (command `egd`).
     lists the rate and fixing date per day;
   - multiplier, CZK/MWh surcharge, monthly fee, VAT, negative-price modes, fixed-price
     comparison, monthly/daily breakdown, CSV/JSON export.
+- `egd spot calc`: separate coefficients for negative spot prices
+  (`--negative-multiplier`, `--negative-add-czk-mwh`; fall back to `-m` / `-a`), consistent
+  with the `--negative` clamp modes.
+- `egd spot calc`: two-rate fixed comparison (`--fixed-price` = VT, `--fixed-price-low` = NT)
+  with NT periods from EG.D's public HDO data (`--hdo-code`, `--psc`, `--hdo-region`,
+  `--hdo-relay`) or a manual schedule (`--low-tariff-hours`, `--low-tariff-hours-weekend`,
+  `--holidays`); NT consumption in the report. New `egd hdo` command and
+  `egd_api_client.lowtariff` module (Czech public holidays included).
+- `egd spot prices --currency czk|eur` (required); EUR uses OTE's own EUR prices in the hourly
+  era as well.
+- `egd spot fx` gained `-o/--export` (CSV/JSON) and a summary, like `egd spot prices`.
+- Distribution fees are not computed: EG.D's OpenAPI provides no distribution rate, breaker
+  or fee data.
 - CSV/XLSX consumption import with column, unit, timestamp-convention and DST detection.
 - Config file `~/.config/egd-api-client/config.toml` with `[egd]`, `[spot]`, `[spot.fixed]`
   sections; environment variables `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`,

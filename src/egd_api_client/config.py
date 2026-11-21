@@ -33,6 +33,7 @@ class Config:
     egd: dict[str, Any] = field(default_factory=dict)
     spot: dict[str, Any] = field(default_factory=dict)  # [spot] – tariff defaults
     fixed: dict[str, Any] = field(default_factory=dict)  # [spot.fixed] – comparison tariff
+    low_tariff: dict[str, Any] = field(default_factory=dict)  # [low_tariff] – NT periods
     path: Path | None = None
     warnings: list[str] = field(default_factory=list)
 
@@ -60,8 +61,26 @@ KNOWN = {
         "api_variant",
         "timestamps",
     },
-    "spot": {"multiplier", "add_czk_mwh", "monthly_fee", "vat", "negative", "price_resolution"},
-    "spot.fixed": {"price_czk_kwh", "monthly_fee"},
+    "spot": {
+        "multiplier",
+        "add_czk_mwh",
+        "negative_multiplier",
+        "negative_add_czk_mwh",
+        "monthly_fee",
+        "vat",
+        "negative",
+        "price_resolution",
+    },
+    "spot.fixed": {"price_czk_kwh", "price_low_czk_kwh", "monthly_fee"},
+    "low_tariff": {
+        "hours",
+        "hours_weekend",
+        "holidays",
+        "hdo_code",
+        "hdo_region",
+        "psc",
+        "hdo_relay",
+    },
 }
 
 
