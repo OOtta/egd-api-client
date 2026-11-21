@@ -89,12 +89,16 @@ def write_canonical_csv(readings: Iterable[Reading], path: Path | io.TextIOBase)
         _write(path)
 
 
-def write_json(readings: Iterable[Reading], fh: io.TextIOBase) -> None:
-    """Write readings as a JSON list of ``{"start", "kwh", "status"}`` objects."""
-    data = [
+def readings_as_json(readings: Iterable[Reading]) -> list[dict[str, Any]]:
+    """Readings as a list of ``{"start", "kwh", "status"}`` objects (local ISO times)."""
+    return [
         {"start": to_local(r.start).isoformat(), "kwh": r.kwh, "status": r.status} for r in readings
     ]
-    json.dump(data, fh, ensure_ascii=False, indent=1)
+
+
+def write_json(readings: Iterable[Reading], fh: io.TextIOBase) -> None:
+    """Write readings as a JSON list of ``{"start", "kwh", "status"}`` objects."""
+    json.dump(readings_as_json(readings), fh, ensure_ascii=False, indent=1)
     fh.write("\n")
 
 

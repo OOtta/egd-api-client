@@ -192,8 +192,9 @@ def test_data_production_json(mocked, monkeypatch, tmp_path):
     assert main([*argv, "--to", "2024-01-01", "-o", str(out)]) == 0
     call = next(c for c in mocked.calls if "/spotreby" in c.request.url)
     assert "profile=ISC1" in call.request.url
-    rows = json.loads(out.read_text(encoding="utf-8"))
-    assert rows == [{"start": "2024-01-01T01:00:00+01:00", "kwh": 0.25, "status": None}]
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["readings"] == [{"start": "2024-01-01T01:00:00+01:00", "kwh": 0.25, "status": None}]
+    assert data["kind"] == "production" and data["warnings"] == []
 
 
 def test_spot_fx_command(capsys, mocked):
@@ -243,7 +244,9 @@ def test_prices_czk_converts_15min_era(mocked, tmp_path, capsys):
     out = tmp_path / "p.json"
     argv = ["spot", "prices", "--currency", "czk", "--from", "2025-09-30", "--to", "2025-10-01"]
     assert main([*argv, "-o", str(out)]) == 0
-    data = json.loads(out.read_text(encoding="utf-8"))
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    assert doc["unit"] == "CZK/MWh" and doc["warnings"] == []
+    data = doc["prices"]
     assert data[0] == {
         "start": "2025-09-30T00:00:00+02:00",
         "minutes": 60,
@@ -266,7 +269,9 @@ def test_spot_fx_export(mocked, tmp_path, capsys):
     assert lines[0] == "day,eur_czk,fixing_date,note"
     assert lines[1] == "2025-10-24,24.34,2025-10-24,"
     assert main([*argv, "-o", str(json_out)]) == 0
-    assert json.loads(json_out.read_text(encoding="utf-8"))[4]["fixing_date"] == "2025-10-27"
+    doc = json.loads(json_out.read_text(encoding="utf-8"))
+    assert doc["rates"][4]["fixing_date"] == "2025-10-27"
+    assert doc["warnings"] == []
 
 
 def test_calc_fixed_vt_nt_with_manual_hours(mocked, tmp_path, capsys):

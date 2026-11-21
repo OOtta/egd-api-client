@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import calendar
 import contextlib
+import json
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -46,13 +47,68 @@ def ensure_unicode_stdio() -> None:
                 stream.reconfigure(encoding="utf-8", errors="replace")
 
 
+class _Run:
+    """Output state of one CLI invocation.
+
+    In JSON mode (``--json``) stdout carries exactly one JSON document and nothing is
+    printed to stderr: progress messages are dropped and warnings are collected and put
+    into the ``warnings`` array of the JSON output (and of JSON files written with ``-o``).
+    """
+
+    def __init__(self) -> None:
+        self.json = False
+        self.warnings: list[str] = []
+
+
+_RUN = _Run()
+
+
+def begin_run(json_mode: bool) -> None:
+    _RUN.json = json_mode
+    _RUN.warnings = []
+
+
+def json_mode() -> bool:
+    return _RUN.json
+
+
+def collected_warnings() -> list[str]:
+    return list(_RUN.warnings)
+
+
 def warn(msg: str) -> None:
-    print(f"warning: {msg}", file=sys.stderr)
+    """Record a warning; print it to stderr unless in JSON mode."""
+    if msg not in _RUN.warnings:
+        _RUN.warnings.append(msg)
+        if not _RUN.json:
+            print(f"warning: {msg}", file=sys.stderr)
 
 
 def info(msg: str, quiet: bool = False) -> None:
-    if not quiet:
+    """Progress / status message on stderr (suppressed in JSON mode)."""
+    if not quiet and not _RUN.json:
         print(msg, file=sys.stderr)
+
+
+def with_warnings(obj: dict[str, Any]) -> dict[str, Any]:
+    """``obj`` with the run's warnings as its ``warnings`` key (always present)."""
+    out = {k: v for k, v in obj.items() if k != "warnings"}
+    out["warnings"] = collected_warnings()
+    return out
+
+
+def dump_json(obj: Any) -> str:
+    return json.dumps(obj, ensure_ascii=False, indent=2)
+
+
+def print_json(obj: dict[str, Any]) -> None:
+    """Print one JSON object (with the collected warnings) to stdout."""
+    print(dump_json(with_warnings(obj)))
+
+
+def write_json_file(path: Path, obj: dict[str, Any]) -> None:
+    """Write one JSON object (with the collected warnings) to ``path`` (UTF-8)."""
+    path.write_text(dump_json(with_warnings(obj)) + "\n", encoding="utf-8")
 
 
 def first(*values: Any) -> Any:

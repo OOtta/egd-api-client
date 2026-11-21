@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from datetime import date
 from pathlib import Path
@@ -14,9 +13,11 @@ from egd_api_client.cli_common import (
     Context,
     build_low_tariff,
     clamp_to_yesterday,
+    collected_warnings,
     first,
     info,
     low_tariff_parser,
+    print_json,
     resolve_period,
     warn,
 )
@@ -134,16 +135,19 @@ def cmd_calc(args: argparse.Namespace) -> int:
     if low_tariff is not None:
         info(f"Low-tariff periods: {low_tariff.describe()}", args.json)
 
+    source: dict[str, Any]
     if args.input:
         data = load_file(Path(args.input), file_options(args))
         start, end = resolve_period(args, data)
         info(f"Loaded {len(data.readings)} readings from {args.input}", args.json)
+        source = {"type": "file", "path": str(args.input), "readings": len(data.readings)}
     else:
         start, end = clamp_to_yesterday(*resolve_period(args))
         info(f"Downloading EG.D data {start} – {end} ...", args.json)
         data = ctx.egd_readings(start, end)
         if data.available_from is not None:
             start = max(start, local_date(data.available_from))
+        source = {"type": "egd-api", "readings": len(data.readings)}
     for w in data.warnings:
         warn(w)
     if end >= date.today():
@@ -173,14 +177,14 @@ def cmd_calc(args: argparse.Namespace) -> int:
     for w in res.warnings:
         warn(w)
 
+    if args.export:
+        export_result(res, Path(args.export), warnings=collected_warnings())
+        info(f"Wrote {args.export}", args.json)
     if args.json:
-        print(json.dumps(res.as_dict(), ensure_ascii=False, indent=2))
+        print_json({"source": source} | res.as_dict())
     else:
         render_summary(res, sys.stdout)
         render_breakdown(res, sys.stdout)
-    if args.export:
-        export_result(res, Path(args.export))
-        info(f"Wrote {args.export}", args.json)
     if args.intervals:
         export_intervals(res, Path(args.intervals))
         info(f"Wrote {args.intervals}", args.json)
@@ -212,17 +216,19 @@ def cmd_prices(args: argparse.Namespace) -> int:
         "max": round(max(nums), 2),
         "negative_points": neg,
     }
+    if args.export:
+        export_prices(
+            points, Path(args.export), currency=args.currency, warnings=collected_warnings()
+        )
+        info(f"Wrote {args.export}", args.json)
     if args.json:
-        print(json.dumps(summary, indent=2))
+        print_json(summary)
     else:
         print(f"Spot prices {start} – {end}: {len(points)} periods ({unit})")
         print(f"  average {fmt(summary['avg'])} {unit}")
         print(f"  min     {fmt(summary['min'])} {unit}")
         print(f"  max     {fmt(summary['max'])} {unit}")
         print(f"  negative periods: {neg}")
-    if args.export:
-        export_prices(points, Path(args.export), currency=args.currency)
-        info(f"Wrote {args.export}", args.json)
     return 0
 
 
@@ -267,8 +273,11 @@ def cmd_fx(args: argparse.Namespace) -> int:
         "min_eur_czk": min(rates) if rates else None,
         "max_eur_czk": max(rates) if rates else None,
     }
+    if args.export:
+        export_fx(rows, Path(args.export), warnings=collected_warnings())
+        info(f"Wrote {args.export}", args.json)
     if args.json:
-        print(json.dumps(summary | {"days_detail": rows}, ensure_ascii=False, indent=2))
+        print_json(summary | {"days_detail": rows})
     else:
         print("delivery day     EUR/CZK  ČNB fixing of")
         for r in rows:
@@ -281,9 +290,6 @@ def cmd_fx(args: argparse.Namespace) -> int:
                 f"min {summary['min_eur_czk']:.3f}, max {summary['max_eur_czk']:.3f} CZK/EUR; "
                 f"{summary['days_with_earlier_fixing']} day(s) used an earlier fixing"
             )
-    if args.export:
-        export_fx(rows, Path(args.export))
-        info(f"Wrote {args.export}", args.json)
     return 0
 
 

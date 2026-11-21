@@ -7,7 +7,6 @@ subpackages register their own command groups (``spot`` → :mod:`egd_api_client
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -15,18 +14,24 @@ from egd_api_client import __version__
 from egd_api_client.cli_common import (
     CliError,
     Context,
+    begin_run,
     clamp_to_yesterday,
+    collected_warnings,
     common_parser,
+    dump_json,
     egd_parser,
     ensure_unicode_stdio,
     info,
+    json_mode,
     period_parser,
+    print_json,
     resolve_period,
     warn,
+    write_json_file,
 )
 from egd_api_client.config import ConfigError
 from egd_api_client.http import FetchError
-from egd_api_client.readings_io import InputFormatError, write_canonical_csv, write_json
+from egd_api_client.readings_io import InputFormatError, readings_as_json, write_canonical_csv
 from egd_api_client.spot import cli as spot_cli
 from egd_api_client.timeutil import local_date
 
@@ -48,7 +53,7 @@ config file (default ~/.config/egd-api-client/config.toml).
 def cmd_meters(args: argparse.Namespace) -> int:
     points = Context(args).egd().metering_points()
     if args.json:
-        print(json.dumps(points, ensure_ascii=False, indent=2))
+        print_json({"metering_points": points})
     else:
         for p in points:
             print(f"{p.get('ean', '?')}\tmeasurement type: {p.get('typMereni', '?')}")
@@ -59,7 +64,7 @@ def cmd_profiles(args: argparse.Namespace) -> int:
     ctx = Context(args)
     profiles = ctx.egd().profiles(args.api_variant or "rest")
     if args.json:
-        print(json.dumps(profiles, ensure_ascii=False, indent=2))
+        print_json({"profiles": profiles})
     else:
         for p in profiles:
             if args.all or p.get("komodita", "ELEKTRINA") == "ELEKTRINA":
@@ -79,19 +84,27 @@ def cmd_data(args: argparse.Namespace) -> int:
             f"{len(data.readings)} values, {total:.3f} kWh, "
             f"{local_date(data.readings[0].start)} – {local_date(data.readings[-1].start)}"
         )
+    summary = {
+        "period": {"from": start.isoformat(), "to": end.isoformat()},
+        "kind": args.kind,
+        "unit": "kWh",
+        "values": len(data.readings),
+        "total_kwh": round(total, 6),
+    }
     out = Path(args.output) if args.output else None
     if out is None:
         if args.json:
-            write_json(data.readings, sys.stdout)  # type: ignore[arg-type]
+            print_json(summary | {"readings": readings_as_json(data.readings)})
         else:
             write_canonical_csv(data.readings, sys.stdout)  # type: ignore[arg-type]
         return 0
     if out.suffix.lower() == ".json":
-        with out.open("w", encoding="utf-8") as fh:
-            write_json(data.readings, fh)  # type: ignore[arg-type]
+        write_json_file(out, summary | {"readings": readings_as_json(data.readings)})
     else:
         write_canonical_csv(data.readings, out)
     info(f"Wrote {out}")
+    if args.json:
+        print_json(summary | {"output": str(out)})
     return 0
 
 
@@ -141,10 +154,14 @@ def main(argv: list[str] | None = None) -> int:
     ensure_unicode_stdio()
     parser = build_parser()
     args = parser.parse_args(argv)
+    begin_run(bool(getattr(args, "json", False)))
     try:
         return int(args.func(args))
     except (CliError, ConfigError, InputFormatError, FetchError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        if json_mode():
+            print(dump_json({"error": str(exc), "warnings": collected_warnings()}))
+        else:
+            print(f"error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:  # pragma: no cover
         return 130

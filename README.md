@@ -163,6 +163,49 @@ Všechny volby vypíše `egd PŘÍKAZ --help` / `egd spot PŘÍKAZ --help`. Spol
 `--from`, `--to` (místní data, včetně; `RRRR-MM-DD` nebo `RRRR-MM` = celý měsíc), `--ean`,
 `--profile`, `--json`, `--config`, `--cache-dir`, `--no-cache`, `--test-env`.
 
+### Výstup JSON (`--json`)
+
+S `--json` vypíše každý příkaz na standardní výstup **jen jeden dokument JSON** – vždy
+objekt – a na chybový výstup nepíše nic. Průběžné hlášky („Downloading …“, „Low-tariff
+periods …“, „Wrote …“) se vynechají a všechna varování (zkrácení období na včerejšek,
+mezery v datech, chybějící ceny OTE, upozornění z konfigurace …) jsou v poli
+**`warnings`** (seznam řetězců, vždy přítomný, případně prázdný). Výstup lze tedy rovnou
+předat např. `python -m json.tool` nebo `jq`.
+
+| Příkaz | Struktura JSON |
+|---|---|
+| `egd meters` | `{"metering_points": [...], "warnings": [...]}` |
+| `egd profiles` | `{"profiles": [...], "warnings": [...]}` |
+| `egd data` | `{"period", "kind", "unit", "values", "total_kwh", "readings": [{"start", "kwh", "status"}], "warnings"}`; s `-o` se místo `readings` vypíše `"output": soubor` |
+| `egd spot calc` | `{"source", "period", "tariff", "fixed_tariff", "low_tariff_schedule", "distribution", "summary", "breakdown", "warnings"}` |
+| `egd spot prices` | souhrn (`from`, `to`, `currency`, `unit`, `points`, `avg`, `min`, `max`, `negative_points`) + `warnings` |
+| `egd spot fx` | souhrn + `days_detail` + `warnings` |
+
+Soubory JSON zapsané přes `-o` / `--export` jsou také čistý JSON s polem `warnings`
+(`egd data` → stejný objekt jako výše, `egd spot calc` → stejný jako `--json`,
+`egd spot prices` → `{"currency", "unit", "prices": [...], "warnings"}`,
+`egd spot fx` → `{"rates": [...], "warnings"}`). Bez `--json` se varování dál vypisují
+na chybový výstup (`warning: …`).
+
+**Chyby:** příkaz skončí s návratovým kódem 2 a v režimu `--json` vypíše na standardní
+výstup `{"error": "…", "warnings": [...]}` (chybový výstup zůstane prázdný). Chyby
+samotných voleb příkazové řádky (neznámá volba, chybějící `--currency` …) hlásí argparse
+jako obvykle textem na chybový výstup.
+
+Ukázka (zkráceno):
+
+```json
+{
+  "source": {"type": "file", "path": "examples/sample_consumption.csv", "readings": 5860},
+  "period": {"from": "2025-09-30", "to": "2025-10-31"},
+  "low_tariff_schedule": "NT 00:00–06:00, 22:00–24:00",
+  "summary": {"kwh": 437.96, "...": "..."},
+  "warnings": [
+    "Consumption data covers 2980/3076 quarter-hours (24 h missing) – totals only include the data available."
+  ]
+}
+```
+
 Nejdůležitější volby `egd spot calc`:
 
 | Volba | Význam |

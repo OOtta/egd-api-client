@@ -34,6 +34,14 @@ First version, published as **egd-api-client** (command `egd`).
   `--distribution-monthly-fee`, config `[distribution]`; report lines `Spot + distrib.` /
   `Fixed + distrib.`, breakdown and export columns. EG.D's OpenAPI provides no distribution
   rate, breaker or fee data and no price tables are built in.
+- `--json` output is a single JSON object on stdout and nothing on stderr: progress
+  messages are suppressed and all warnings go into a `warnings` array (always present).
+  Errors in JSON mode print `{"error": ..., "warnings": [...]}` to stdout (exit code 2).
+  JSON files written with `-o` also carry `warnings`. **Changed structure** (previously
+  top-level lists): `egd meters --json` → `{"metering_points": [...]}`, `egd profiles
+  --json` → `{"profiles": [...]}`, `egd data` JSON → object with `readings`,
+  `egd spot prices -o *.json` → `{"currency", "unit", "prices": [...]}`, `egd spot fx -o
+  *.json` → `{"rates": [...]}`. `egd spot calc` JSON gains `source`.
 - `egd spot calc` shows the average spot price with the tariff applied (`Spot + tariff`:
   coefficients incl. negative-price handling, CZK/MWh excl. VAT and fees; weighted = energy cost /
   consumption, plus the simple average of the period), directly comparable with the fixed

@@ -163,9 +163,14 @@ def render_breakdown(res: Result, out: TextIO) -> None:
     out.write(f"({avg} in CZK/MWh excl. VAT, consumption-weighted; money in CZK; {vat_note})\n")
 
 
-def export_result(res: Result, path: Path) -> None:
+def export_result(res: Result, path: Path, warnings: Sequence[str] | None = None) -> None:
+    """Write the result; JSON = the same object as ``--json`` (``warnings`` replaced by
+    ``warnings`` if given, e.g. all warnings of the CLI run)."""
     if path.suffix.lower() == ".json":
-        path.write_text(json.dumps(res.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        data = res.as_dict()
+        if warnings is not None:
+            data["warnings"] = list(warnings)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return
     rows = [b.as_dict() for b in res.buckets] or [res.total.as_dict()]
     with path.open("w", encoding="utf-8", newline="") as fh:
@@ -190,11 +195,17 @@ def export_intervals(res: Result, path: Path) -> None:
             )
 
 
-def export_prices(points: Sequence[PricePoint], path: Path, currency: str = "czk") -> None:
-    """Export prices; the ``price`` column/field is in the chosen currency (per MWh).
+def export_prices(
+    points: Sequence[PricePoint],
+    path: Path,
+    currency: str = "czk",
+    warnings: Sequence[str] = (),
+) -> None:
+    """Export prices; the price column/field is in the chosen currency (per MWh).
 
     ``eur_czk`` is the ČNB rate used for conversion (15-minute era) or empty when OTE
-    published both currencies itself (hourly era).
+    published both currencies itself (hourly era). JSON is an object
+    ``{"currency", "unit", "prices": [...], "warnings": [...]}``.
     """
     eur = currency == "eur"
 
@@ -206,7 +217,7 @@ def export_prices(points: Sequence[PricePoint], path: Path, currency: str = "czk
 
     unit = "eur_mwh" if eur else "czk_mwh"
     if path.suffix.lower() == ".json":
-        data = [
+        rows = [
             {
                 "start": to_local(p.start).isoformat(),
                 "minutes": int(p.length.total_seconds() // 60),
@@ -215,7 +226,13 @@ def export_prices(points: Sequence[PricePoint], path: Path, currency: str = "czk
             }
             for p in points
         ]
-        path.write_text(json.dumps(data, indent=1), encoding="utf-8")
+        data = {
+            "currency": currency.upper(),
+            "unit": "EUR/MWh" if eur else "CZK/MWh",
+            "prices": rows,
+            "warnings": list(warnings),
+        }
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         return
     with path.open("w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh, lineterminator="\n")
@@ -231,10 +248,14 @@ def export_prices(points: Sequence[PricePoint], path: Path, currency: str = "czk
             )
 
 
-def export_fx(rows: Sequence[dict], path: Path) -> None:
-    """Export per-day EUR/CZK rates (``day, eur_czk, fixing_date, note``)."""
+def export_fx(rows: Sequence[dict], path: Path, warnings: Sequence[str] = ()) -> None:
+    """Export per-day EUR/CZK rates (``day, eur_czk, fixing_date, note``).
+
+    JSON is an object ``{"rates": [...], "warnings": [...]}``.
+    """
     if path.suffix.lower() == ".json":
-        path.write_text(json.dumps(list(rows), ensure_ascii=False, indent=1), encoding="utf-8")
+        data = {"rates": list(rows), "warnings": list(warnings)}
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         return
     with path.open("w", encoding="utf-8", newline="") as fh:
         w = csv.DictWriter(
