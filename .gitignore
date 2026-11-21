@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local config / secrets / data
+config.toml
+.env
+*.secret
+/data/
+/out/
+*.xlsx
+!tests/fixtures/*.xlsx
+
+# Editors
+.idea/
+.vscode/
+.DS_Store
