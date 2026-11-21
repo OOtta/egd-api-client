@@ -35,6 +35,8 @@ First version, published as **egd-api-client** (command `egd`).
   `Fixed + distrib.`, breakdown and export columns. EG.D's OpenAPI provides no distribution
   rate, breaker or fee data and no price tables are built in.
 - Documentation in Czech (`README.md`).
+- Windows: console output with Czech characters (e.g. `ČNB`) no longer fails on a
+  redirected/piped cp1252 stdout – such streams are switched to UTF-8.
 - CSV/XLSX consumption import with column, unit, timestamp-convention and DST detection.
 - Config file `~/.config/egd-api-client/config.toml` with `[egd]`, `[spot]`, `[spot.fixed]`
   sections; environment variables `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`,

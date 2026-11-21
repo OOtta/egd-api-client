@@ -80,7 +80,7 @@ class FakeOte:
 
 
 def cnb_text() -> str:
-    return (FIXTURES / "cnb_2025_sep_oct.txt").read_text()
+    return (FIXTURES / "cnb_2025_sep_oct.txt").read_text(encoding="utf-8")
 
 
 @pytest.fixture

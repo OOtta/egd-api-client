@@ -1,4 +1,6 @@
+import io
 import json
+import sys
 from datetime import date
 
 import pytest
@@ -32,7 +34,7 @@ def sample_csv(tmp_path):
             h, m = divmod(q * 15, 60)
             lines.append(f"{day} {h:02d}:{m:02d};0,25")
     p = tmp_path / "c.csv"
-    p.write_text("\n".join(lines))
+    p.write_text("\n".join(lines), encoding="utf-8")
     return p
 
 
@@ -75,8 +77,8 @@ def test_calc_from_file_json_and_exports(mocked, tmp_path, capsys):
     assert day2["total_czk"] == pytest.approx(
         24 * (100 * rate * 1.15 + 400) / 1000 * 1.21, abs=0.01
     )
-    assert json.loads(out_json.read_text())["summary"]["kwh"] == pytest.approx(48)
-    assert len(out_csv.read_text().splitlines()) == 1 + 192
+    assert json.loads(out_json.read_text(encoding="utf-8"))["summary"]["kwh"] == pytest.approx(48)
+    assert len(out_csv.read_text(encoding="utf-8").splitlines()) == 1 + 192
 
 
 def test_calc_text_output(mocked, tmp_path, capsys):
@@ -147,7 +149,7 @@ def test_prices_command(mocked, tmp_path, capsys):
         == 0
     )
     assert "23 periods" in capsys.readouterr().out
-    assert len(out.read_text().splitlines()) == 24
+    assert len(out.read_text(encoding="utf-8").splitlines()) == 24
 
 
 def test_data_command(mocked, monkeypatch, tmp_path):
@@ -164,7 +166,7 @@ def test_data_command(mocked, monkeypatch, tmp_path):
         main(["data", "--ean", "859", "--from", "2024-01-01", "--to", "2024-01-01", "-o", str(out)])
         == 0
     )
-    assert out.read_text().splitlines()[1] == "2024-01-01T01:00:00+01:00,0.5,"
+    assert out.read_text(encoding="utf-8").splitlines()[1] == "2024-01-01T01:00:00+01:00,0.5,"
 
 
 def test_bad_period(capsys, tmp_path):
@@ -190,7 +192,7 @@ def test_data_production_json(mocked, monkeypatch, tmp_path):
     assert main([*argv, "--to", "2024-01-01", "-o", str(out)]) == 0
     call = next(c for c in mocked.calls if "/spotreby" in c.request.url)
     assert "profile=ISC1" in call.request.url
-    rows = json.loads(out.read_text())
+    rows = json.loads(out.read_text(encoding="utf-8"))
     assert rows == [{"start": "2024-01-01T01:00:00+01:00", "kwh": 0.25, "status": None}]
 
 
@@ -228,7 +230,7 @@ def test_prices_eur_uses_ote_eur_values_in_both_eras(mocked, tmp_path, capsys):
     summary = json.loads(capsys.readouterr().out)
     assert summary["unit"] == "EUR/MWh"
     assert summary["min"] == pytest.approx(80.0) and summary["max"] == pytest.approx(100.0)
-    rows = out.read_text().splitlines()
+    rows = out.read_text(encoding="utf-8").splitlines()
     assert rows[0] == "start,minutes,eur_mwh,eur_czk"
     assert rows[1] == "2025-09-30T00:00:00+02:00,60,100.00,"  # OTE's own EUR (InEur=true)
     assert rows[-1].endswith(",15,80.00,24.295")
@@ -241,7 +243,7 @@ def test_prices_czk_converts_15min_era(mocked, tmp_path, capsys):
     out = tmp_path / "p.json"
     argv = ["spot", "prices", "--currency", "czk", "--from", "2025-09-30", "--to", "2025-10-01"]
     assert main([*argv, "-o", str(out)]) == 0
-    data = json.loads(out.read_text())
+    data = json.loads(out.read_text(encoding="utf-8"))
     assert data[0] == {
         "start": "2025-09-30T00:00:00+02:00",
         "minutes": 60,
@@ -260,11 +262,11 @@ def test_spot_fx_export(mocked, tmp_path, capsys):
     assert "2025-10-28 Tue   24.325  2025-10-27" in text
     assert "2 day(s) used an earlier fixing" not in text  # Sat, Sun and the holiday → 3
     assert "3 day(s) used an earlier fixing" in text
-    lines = csv_out.read_text().splitlines()
+    lines = csv_out.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "day,eur_czk,fixing_date,note"
     assert lines[1] == "2025-10-24,24.34,2025-10-24,"
     assert main([*argv, "-o", str(json_out)]) == 0
-    assert json.loads(json_out.read_text())[4]["fixing_date"] == "2025-10-27"
+    assert json.loads(json_out.read_text(encoding="utf-8"))[4]["fixing_date"] == "2025-10-27"
 
 
 def test_calc_fixed_vt_nt_with_manual_hours(mocked, tmp_path, capsys):
@@ -348,7 +350,29 @@ def test_holidays_values(capsys, tmp_path, monkeypatch):
         main([*base, "--holidays", "sunday"])
     assert "invalid choice" in capsys.readouterr().err
     cfg = tmp_path / "c.toml"
-    cfg.write_text('[low_tariff]\nhours = "22:00-06:00"\nholidays = "sunday"\n')
+    cfg.write_text('[low_tariff]\nhours = "22:00-06:00"\nholidays = "sunday"\n', encoding="utf-8")
     monkeypatch.setenv("EGD_CONFIG", str(cfg))
     assert main(["spot", "calc", "-i", str(sample_csv(tmp_path))]) == 2
     assert "'weekday' or 'weekend'" in capsys.readouterr().err
+
+
+def test_cp1252_stdout_gets_utf8(tmp_path, monkeypatch):
+    """A Windows-style cp1252 stdout (redirected/piped) must not crash on 'ČNB'."""
+    raw_out, raw_err = io.BytesIO(), io.BytesIO()
+    out = io.TextIOWrapper(raw_out, encoding="cp1252", errors="strict")
+    err = io.TextIOWrapper(raw_err, encoding="cp1252", errors="strict")
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    assert main(["spot", "calc", "-i", str(sample_csv(tmp_path)), "--to", "2025-09-30"]) == 0
+    out.flush()
+    assert out.encoding.lower().replace("-", "") == "utf8"
+    assert "kWh" in raw_out.getvalue().decode("utf-8")
+
+
+def test_utf8_stdout_left_alone(monkeypatch):
+    from egd_api_client.cli_common import ensure_unicode_stdio
+
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
+    monkeypatch.setattr(sys, "stdout", stream)
+    ensure_unicode_stdio()
+    assert sys.stdout.errors == "strict"

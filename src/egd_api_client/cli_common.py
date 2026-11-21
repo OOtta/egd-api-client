@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import calendar
+import contextlib
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -20,6 +21,29 @@ from egd_api_client.timeutil import local_date, local_day_bounds_utc
 
 class CliError(Exception):
     """User-facing error; printed without a traceback."""
+
+
+_PROBE = "čČřŘ–€"
+
+
+def ensure_unicode_stdio() -> None:
+    """Make stdout/stderr able to print Czech text and the en dash.
+
+    On Windows, a redirected or piped stdout uses the ANSI code page (e.g. cp1252),
+    which cannot encode characters such as ``Č`` in ``ČNB``. Streams that cannot
+    encode them are switched to UTF-8 with ``errors="replace"``; streams that already
+    can are left alone.
+    """
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        encoding = getattr(stream, "encoding", None)
+        if stream is None or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            _PROBE.encode(encoding or "ascii")
+        except (UnicodeEncodeError, LookupError):
+            with contextlib.suppress(ValueError, OSError):  # detached/closed stream
+                stream.reconfigure(encoding="utf-8", errors="replace")
 
 
 def warn(msg: str) -> None:

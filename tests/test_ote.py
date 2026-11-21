@@ -8,13 +8,15 @@ from egd_api_client.timeutil import HOUR, PRAGUE, QUARTER
 
 
 def test_parse_real_hourly_response_dst_start():
-    items = parse_items((FIXTURES / "ote_dam_price_e_2024-03-31.xml").read_text())
+    items = parse_items((FIXTURES / "ote_dam_price_e_2024-03-31.xml").read_text(encoding="utf-8"))
     assert len(items) == 23  # spring DST day has 23 hours
     assert items[0] == {"Date": "2024-03-31", "Hour": "1", "Price": "1660.77", "Volume": "2363.8"}
 
 
 def test_parse_real_15min_response_dst_end():
-    items = parse_items((FIXTURES / "ote_dam_price_period_e_2025-10-26.xml").read_text())
+    items = parse_items(
+        (FIXTURES / "ote_dam_price_period_e_2025-10-26.xml").read_text(encoding="utf-8")
+    )
     assert len(items) == 100  # autumn DST day has 100 quarter-hours
     assert items[8]["PeriodInterval"] == "02a:00-02a:15"
     assert items[12]["PeriodInterval"] == "02b:00-02b:15"

@@ -18,6 +18,7 @@ from egd_api_client.cli_common import (
     clamp_to_yesterday,
     common_parser,
     egd_parser,
+    ensure_unicode_stdio,
     info,
     period_parser,
     resolve_period,
@@ -137,6 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    ensure_unicode_stdio()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
