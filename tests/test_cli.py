@@ -5,15 +5,16 @@ import pytest
 import responses
 
 from conftest import FakeOte, add_cnb, add_ote
-from egd_spot.cli import main, parse_date_arg
-from egd_spot.egd import PROD_DATA_URL, PROD_TOKEN_URL
+from egd_api_client.cli import main
+from egd_api_client.cli_common import parse_date_arg
+from egd_api_client.client import PROD_DATA_URL, PROD_TOKEN_URL
 
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
-    monkeypatch.setenv("EGD_SPOT_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("EGD_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
-    for v in ("EGD_CLIENT_ID", "EGD_CLIENT_SECRET", "EGD_EAN", "EGD_SPOT_CONFIG"):
+    for v in ("EGD_CLIENT_ID", "EGD_CLIENT_SECRET", "EGD_EAN", "EGD_CONFIG"):
         monkeypatch.delenv(v, raising=False)
 
 
@@ -42,6 +43,7 @@ def test_calc_from_file_json_and_exports(mocked, tmp_path, capsys):
     out_csv = tmp_path / "i.csv"
     rc = main(
         [
+            "spot",
             "calc",
             "-i",
             str(sample_csv(tmp_path)),
@@ -80,7 +82,10 @@ def test_calc_from_file_json_and_exports(mocked, tmp_path, capsys):
 def test_calc_text_output(mocked, tmp_path, capsys):
     add_cnb(mocked)
     add_ote(mocked, FakeOte(lambda d, i: 1000.0 if d < date(2025, 10, 1) else 40.0))
-    assert main(["calc", "-i", str(sample_csv(tmp_path)), "-b", "month", "--fixed-price", "9"]) == 0
+    assert (
+        main(["spot", "calc", "-i", str(sample_csv(tmp_path)), "-b", "month", "--fixed-price", "9"])
+        == 0
+    )
     out = capsys.readouterr().out
     assert "TOTAL:" in out
     assert "CHEAPER" in out
@@ -88,7 +93,7 @@ def test_calc_text_output(mocked, tmp_path, capsys):
 
 
 def test_calc_api_requires_credentials(capsys):
-    rc = main(["calc", "--ean", "859", "--from", "2025-01"])
+    rc = main(["spot", "calc", "--ean", "859", "--from", "2025-01"])
     assert rc == 2
     assert "EGD_CLIENT_ID" in capsys.readouterr().err
 
@@ -111,7 +116,9 @@ def test_calc_via_api(mocked, monkeypatch, capsys):
         ],
     )
     add_ote(mocked, FakeOte(lambda d, i: 4000.0))
-    rc = main(["calc", "--ean", "859", "--from", "2024-01-01", "--to", "2024-01-01", "--json"])
+    rc = main(
+        ["spot", "calc", "--ean", "859", "--from", "2024-01-01", "--to", "2024-01-01", "--json"]
+    )
     assert rc == 0
     s = json.loads(capsys.readouterr().out)["summary"]
     # 23:00Z on 2024-01-01 belongs to 2 Jan local, so 92 of 96 quarters count: 92 × 0.25 kWh
@@ -122,12 +129,14 @@ def test_calc_via_api(mocked, monkeypatch, capsys):
 def test_prices_command(mocked, tmp_path, capsys):
     add_ote(mocked, FakeOte(lambda d, i: float(i)))
     out = tmp_path / "p.csv"
-    assert main(["prices", "--from", "2024-03-31", "--to", "2024-03-31", "-o", str(out)]) == 0
+    assert (
+        main(["spot", "prices", "--from", "2024-03-31", "--to", "2024-03-31", "-o", str(out)]) == 0
+    )
     assert "23 periods" in capsys.readouterr().out
     assert len(out.read_text().splitlines()) == 24
 
 
-def test_fetch_command(mocked, monkeypatch, tmp_path):
+def test_data_command(mocked, monkeypatch, tmp_path):
     monkeypatch.setenv("EGD_CLIENT_ID", "id")
     monkeypatch.setenv("EGD_CLIENT_SECRET", "secret")
     mocked.add(responses.POST, PROD_TOKEN_URL, json={"access_token": "t"})
@@ -138,14 +147,46 @@ def test_fetch_command(mocked, monkeypatch, tmp_path):
     )
     out = tmp_path / "f.csv"
     assert (
-        main(
-            ["fetch", "--ean", "859", "--from", "2024-01-01", "--to", "2024-01-01", "-o", str(out)]
-        )
+        main(["data", "--ean", "859", "--from", "2024-01-01", "--to", "2024-01-01", "-o", str(out)])
         == 0
     )
     assert out.read_text().splitlines()[1] == "2024-01-01T01:00:00+01:00,0.5,"
 
 
 def test_bad_period(capsys, tmp_path):
-    assert main(["prices", "--from", "2025-02-01", "--to", "2025-01-01"]) == 2
+    assert main(["spot", "prices", "--from", "2025-02-01", "--to", "2025-01-01"]) == 2
     assert "before" in capsys.readouterr().err
+
+
+def test_data_production_json(mocked, monkeypatch, tmp_path):
+    monkeypatch.setenv("EGD_CLIENT_ID", "id")
+    monkeypatch.setenv("EGD_CLIENT_SECRET", "secret")
+    mocked.add(responses.POST, PROD_TOKEN_URL, json={"access_token": "t"})
+    mocked.add(responses.GET, f"{PROD_DATA_URL}/om", json=[{"ean": "859", "typMereni": "B"}])
+    mocked.add(
+        responses.GET,
+        f"{PROD_DATA_URL}/spotreby",
+        json={"units": "kWh", "data": [{"timestamp": "2024-01-01T00:00:00Z", "value": 0.25}]},
+    )
+    out = tmp_path / "p.json"
+    argv = ["data", "--ean", "859", "--kind", "production", "--from", "2024-01-01"]
+    assert main([*argv, "--to", "2024-01-01", "-o", str(out)]) == 0
+    call = next(c for c in mocked.calls if "/spotreby" in c.request.url)
+    assert "profile=ISC1" in call.request.url
+    rows = json.loads(out.read_text())
+    assert rows == [{"start": "2024-01-01T01:00:00+01:00", "kwh": 0.25, "status": None}]
+
+
+def test_spot_fx_command(capsys, mocked):
+    add_cnb(mocked)
+    assert main(["spot", "fx", "--from", "2025-09-27", "--to", "2025-10-28", "--json"]) == 0
+    rows = {r["day"]: r for r in json.loads(capsys.readouterr().out)}
+    assert rows["2025-09-27"]["eur_czk"] is None  # hourly era: OTE CZK prices used directly
+    assert rows["2025-10-04"] == {
+        "day": "2025-10-04",
+        "eur_czk": pytest.approx(24.27),
+        "fixing_date": "2025-10-03",
+        "note": "no fixing that day → last fixing before",
+    }
+    assert rows["2025-10-28"]["fixing_date"] == "2025-10-27"
+    assert rows["2025-10-27"]["fixing_date"] == "2025-10-27"

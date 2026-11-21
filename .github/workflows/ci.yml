@@ -20,4 +20,4 @@ jobs:
       - run: python -m pip install -e ".[dev]"
       - run: ruff check .
       - run: ruff format --check .
-      - run: pytest --cov=egd_spot
+      - run: pytest --cov=egd_api_client

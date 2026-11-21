@@ -1,18 +1,22 @@
-# egd-spot-calc
+# egd-api-client
 
-**What would my electricity have cost on a spot-price tariff?**
+**A Python client and command-line tool for the EG.D (E.ON Distribuce) Distribuce24 OpenAPI.**
 
-`egd-spot` is a command-line tool for households and businesses in the
-[EG.D (E.ON Distribuce)](https://www.egd.cz) distribution area of the Czech Republic. It
+`egd` downloads your historical 15-minute smart-meter data for metering points in the
+[EG.D](https://www.egd.cz) distribution area of the Czech Republic – and does useful things
+with it. The first feature built on top of the client is the **spot-tariff calculator**:
 
-1. downloads your historical 15-minute smart-meter data from the **EG.D Distribuce24 OpenAPI**
-   (or reads an exported CSV/XLSX file),
-2. downloads the **OTE-CR day-ahead market prices** for the same period by itself
-   (hourly prices before 1 Oct 2025, 15-minute prices since), converting EUR → CZK with the
-   official **ČNB** exchange rate where needed,
-3. applies your supplier's spot-tariff formula – e.g. `spot × 1.15`, `spot + 400 CZK/MWh`,
-   a monthly fee, VAT – and prints what you would have paid, optionally per month or per day
-   and compared with a fixed-price tariff.
+* `egd meters`, `egd data` – list your metering points, export consumption or production
+  (feed-in) data to CSV / JSON;
+* `egd spot calc` – what would your electricity have cost on a spot-price tariff? Downloads
+  the **OTE-CR day-ahead prices** by itself (hourly before 1 Oct 2025, 15-minute since,
+  converted with the official **ČNB** rate of each delivery day) and applies your supplier's
+  formula – `spot × 1.15`, `spot + 400 CZK/MWh`, monthly fee, VAT – optionally per month or
+  day and compared with a fixed-price tariff;
+* `egd spot prices`, `egd spot fx` – the prices and EUR/CZK rates themselves.
+
+The same functionality is available as a library (`egd_api_client.EgdClient`,
+`egd_api_client.spot`), so more features can be added as further sub-commands.
 
 > 🇨🇿 Česky: viz [níže](#česky).
 
@@ -23,7 +27,9 @@
 - [Getting EG.D API access](#getting-egd-api-access)
 - [Configuration](#configuration)
 - [Commands](#commands)
+- [Using it as a library](#using-it-as-a-library)
 - [How the cost is calculated](#how-the-cost-is-calculated)
+- [EUR/CZK conversion](#eurczk-conversion)
 - [Data sources](#data-sources)
 - [Input files](#input-files)
 - [Limitations](#limitations)
@@ -35,18 +41,28 @@
 Python 3.11+ is required. The recommended way is [pipx](https://pipx.pypa.io):
 
 ```bash
-pipx install "git+https://github.com/OWNER/egd-spot-calc"          # CSV input + API
-pipx install "egd-spot-calc[xlsx] @ git+https://github.com/OWNER/egd-spot-calc"  # + XLSX input
+pipx install "git+https://github.com/OWNER/egd-api-client"                     # API + CSV
+pipx install "egd-api-client[xlsx] @ git+https://github.com/OWNER/egd-api-client"  # + XLSX input
 ```
 
 From a local checkout: `pipx install ".[xlsx]"` (or `pip install -e ".[dev]"` for development).
 
 ## Quick start
 
-Try it without any credentials using the bundled synthetic consumption file:
+With your EG.D API credentials:
 
 ```bash
-egd-spot calc --input examples/sample_consumption.csv \
+export EGD_CLIENT_ID=...  EGD_CLIENT_SECRET=...
+egd meters                                         # your metering points (EANs)
+egd data --ean 859182400xxxxxxxxx --from 2026-10 -o october.csv
+egd spot calc --ean 859182400xxxxxxxxx --from 2025-01 --to 2025-12 \
+    -m 1.15 -a 400 --vat --breakdown month
+```
+
+Try the calculator without any credentials using the bundled synthetic consumption file:
+
+```bash
+egd spot calc --input examples/sample_consumption.csv \
     --multiplier 1.15 --add-czk-mwh 400 --monthly-fee 150 --vat \
     --fixed-price 3.5 --fixed-monthly-fee 150 --breakdown month
 ```
@@ -83,15 +99,6 @@ Period       kWh  Spot avg    Energy     Fee     Total  CZK/kWh     Fixed    Sav
 
 (`examples/sample_consumption.csv` is synthetic; the prices are the real OTE prices.)
 
-With your EG.D API credentials:
-
-```bash
-export EGD_CLIENT_ID=...  EGD_CLIENT_SECRET=...
-egd-spot meters                                   # list your metering points (EANs)
-egd-spot calc --ean 859182400xxxxxxxxx --from 2025-01 --to 2025-12 \
-    --add-czk-mwh 350 --vat --breakdown month
-```
-
 ## Getting EG.D API access
 
 The EG.D "Vzdálený přístup – OpenAPI" is free, but you have to enable it yourself:
@@ -103,44 +110,50 @@ The EG.D "Vzdálený přístup – OpenAPI" is free, but you have to enable it y
 3. Put the values into environment variables or the config file (see below).
 
 The API serves metering points with **measurement type A, B or C1** – C1 means an active
-smart meter with 15-minute data. Type C4 (no interval metering) has no data to compute with.
+smart meter with 15-minute data. Type C4 (no interval metering) has no data.
 EG.D updates the data once a day; please do not run the tool in a tight loop.
 
 No API access? Export the data from the portal (*Historie spotřeb → export .xlsx*) and use
-`--input` instead.
+`egd spot calc --input` instead.
 
 ## Configuration
 
 Settings are read from (later wins):
 
-1. the config file – `~/.config/egd-spot/config.toml` (Linux/macOS),
-   `%APPDATA%\egd-spot\config.toml` (Windows), or `--config FILE` / `EGD_SPOT_CONFIG`;
+1. the config file – `~/.config/egd-api-client/config.toml` (Linux/macOS),
+   `%APPDATA%\egd-api-client\config.toml` (Windows), or `--config FILE` / `EGD_CONFIG`;
 2. environment variables `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`;
 3. command-line options.
 
-See [`examples/config.example.toml`](examples/config.example.toml). If you store the secret
-in the file, `chmod 600` it – the tool warns otherwise. Secrets are never printed or cached;
-the daily access token is kept in memory only.
+The file has an `[egd]` section (credentials, EAN, API options) and one section per feature
+(`[spot]`, `[spot.fixed]`); see [`examples/config.example.toml`](examples/config.example.toml).
+If you store the secret in the file, `chmod 600` it – the tool warns otherwise. Secrets are
+never printed or cached; the daily access token is kept in memory only.
 
-Downloaded prices and exchange rates are cached in `~/.cache/egd-spot` (override with
-`--cache-dir` / `EGD_SPOT_CACHE_DIR`, disable with `--no-cache`). Only complete days are
-cached, so re-running a calculation is instant and offline-friendly.
+Downloaded prices and exchange rates are cached in `~/.cache/egd-api-client` (override with
+`--cache-dir` / `EGD_CACHE_DIR`, disable with `--no-cache`). Only complete days are cached.
+Metering data are never cached.
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
-| `egd-spot calc` | compute the spot-tariff cost of your consumption (API or file) |
-| `egd-spot prices` | download / summarise / export OTE spot prices |
-| `egd-spot fetch` | download EG.D consumption into a reusable CSV |
-| `egd-spot meters` | list metering points available to your API credentials |
+| `egd meters` | list metering points available to your API credentials |
+| `egd profiles` | list EG.D profile codes |
+| `egd data` | download 15-minute consumption (`--kind consumption`, default) or production (`--kind production`) to CSV or JSON |
+| `egd spot calc` | compute the spot-tariff cost of your consumption (API or file) |
+| `egd spot prices` | download / summarise / export OTE spot prices |
+| `egd spot fx` | show the ČNB EUR/CZK rate applied to each delivery day |
 
-Run `egd-spot COMMAND --help` for all options. The most important ones of `calc`:
+Run `egd COMMAND --help` / `egd spot COMMAND --help` for all options. Common options:
+`--from`, `--to` (local Czech dates, inclusive; `YYYY-MM-DD` or `YYYY-MM` = whole month),
+`--ean`, `--profile`, `--json`, `--config`, `--cache-dir`, `--no-cache`.
+
+The most important options of `egd spot calc`:
 
 | Option | Meaning |
 |---|---|
-| `--from`, `--to` | period in local Czech dates, inclusive; `YYYY-MM-DD` or `YYYY-MM` (whole month). With `--input` they default to the file's range |
-| `--ean` | metering point (uses the API) |
+| `--ean` | metering point (uses the API); with `--input` the period defaults to the file's range |
 | `-i, --input FILE` | CSV/XLSX consumption file instead of the API |
 | `-m, --multiplier X` | spot price multiplier, e.g. `1.15` |
 | `-a, --add-czk-mwh X` | fixed surcharge in CZK/MWh, e.g. `400` (negative values allowed) |
@@ -158,22 +171,45 @@ Run `egd-spot COMMAND --help` for all options. The most important ones of `calc`
 More examples:
 
 ```bash
+# Export a year of consumption and of feed-in (production) data
+egd data --ean 8591824... --from 2025-01 --to 2025-12 -o consumption-2025.csv
+egd data --ean 8591824... --kind production --from 2025-06 -o feed-in-2025-06.json
+
 # A whole year, monthly breakdown, exported to JSON
-egd-spot calc --ean 8591824... --from 2025-01 --to 2025-12 -m 1.1 -a 300 -b month -o 2025.json
+egd spot calc --ean 8591824... --from 2025-01 --to 2025-12 -m 1.1 -a 300 -b month -o 2025.json
+
+# Download once, then experiment offline with different tariffs
+egd data --ean 8591824... --from 2025-01 --to 2025-12 -o 2025.csv
+egd spot calc -i 2025.csv -m 1.15 && egd spot calc -i 2025.csv -a 500
 
 # Supplier bills hourly prices even after the switch to 15-minute trading
-egd-spot calc -i export.xlsx -a 450 --price-resolution hourly
+egd spot calc -i export.xlsx -a 450 --price-resolution hourly
 
 # Never get paid for consumption at negative prices
-egd-spot calc -i export.csv -a 400 --negative clamp-total
+egd spot calc -i export.csv -a 400 --negative clamp-total
 
-# Save API data once, then experiment offline with different tariffs
-egd-spot fetch --ean 8591824... --from 2025-01 --to 2025-12 -o 2025.csv
-egd-spot calc -i 2025.csv -m 1.15 && egd-spot calc -i 2025.csv -a 500
-
-# Just the prices
-egd-spot prices --from 2025-11 --export prices-2025-11.csv
+# Just the prices, and the exchange rates used for them
+egd spot prices --from 2025-11 --export prices-2025-11.csv
+egd spot fx --from 2026-10-24 --to 2026-11-02
 ```
+
+## Using it as a library
+
+```python
+from datetime import date
+from egd_api_client import EgdClient, EgdCredentials, make_session
+from egd_api_client.timeutil import local_day_bounds_utc
+
+client = EgdClient(make_session(), EgdCredentials(client_id, client_secret))
+print(client.metering_points())  # [{"ean": "...", "typMereni": "B"}]
+start, end = local_day_bounds_utc(date(2026, 10, 1), date(2026, 10, 31))
+result = client.readings(ean, start, end, kind="consumption")  # or kind="production"
+print(sum(r.kwh for r in result.readings), result.warnings)
+```
+
+`readings()` handles token refresh, 30-day chunking, the exclusive `to`, unit conversion
+(kW → kWh) and clamping to the period you are authorised for. Spot-price building blocks
+live in `egd_api_client.spot` (`ote.OteClient`, `cnb.CnbRates`, `calculator.compute`).
 
 ## How the cost is calculated
 
@@ -206,13 +242,33 @@ effective price = total / Σ E_i                      [CZK/kWh]
 * Periods without consumption data or without a market price are excluded and reported as
   warnings (e.g. the 4 July 2025 emergency state, when OTE published no prices for 12 hours).
 
+## EUR/CZK conversion
+
+Since 1 Oct 2025 OTE publishes day-ahead prices in EUR only, so they have to be converted.
+The tool uses the **ČNB rate valid for the delivery day**:
+
+* ČNB publishes its fixing every business day at about 14:30; it applies to that day and to
+  any following weekend days and public holidays until the next fixing;
+* so a delivery day that is a business day uses **its own** fixing, a Saturday, Sunday or
+  holiday uses the **last fixing before it** (e.g. Tue 17 Nov 2026, a holiday → Mon 16 Nov).
+
+This is precisely the rate OTE itself reports as `EurRate` ("Kurz ČNB pro daný den dodávky")
+in its daily index (`GetDamIndexE`) and used for its own CZK prices before Oct 2025. It was
+checked day by day against OTE and against ČNB's API for Jan–Sep 2025 and Jun–Nov 2026 with
+no difference (a "previous business day" rule would differ on most days).
+`egd spot fx` shows which rate and fixing date are used for each day. For days before
+1 Oct 2025 no conversion happens – OTE's CZK prices are used directly. Prices are cached in EUR and converted on
+every run, so a rate is never "frozen" in the cache. The fixing of a business day exists
+only after ~14:30 that day; until then (and for tomorrow's prices, which OTE publishes
+around 13:00) the last available fixing is used, which makes such figures provisional.
+
 ## Data sources
 
 | Data | Source | Notes |
 |---|---|---|
 | Consumption | EG.D OpenAPI – `POST https://idm.distribuce24.cz/oauth/token` (client credentials, scope `namerena_data_openapi`), `GET https://data.distribuce24.cz/rest/spotreby?ean=…&profile=ICC1&from=…&to=…` | Profile `ICC1` = mean 15-min power in kW (÷4 → kWh); `ICQ2` = kWh; `DCQC` = C1 smart meters. Max 3000 values per call → requested in 30-day chunks (`to` is exclusive; paging parameters are avoided because `pageStart=1` drops a value). [User guide (PDF)](https://www.egd.cz/sites/default/files/2026-05/uzivatelsky_navod_openapi_abc.pdf), [older version](https://portal.distribuce24.cz/download/Uzivatelsky_navod_OpenApi.pdf) |
 | Spot prices | OTE-CR public SOAP service `https://www.ote-cr.cz/pw-data/services/PublicDataService` – `GetDamPriceE` (hourly, CZK) and `GetDamPricePeriodE` (15-min, EUR) | One calendar month per request. [Manual](https://www.ote-cr.cz/cs/dokumentace/xsd-wsdl-manual-pubweb) |
-| EUR/CZK | ČNB daily fixing, [`year.txt`](https://www.cnb.cz/en/financial-markets/foreign-exchange-market/central-bank-exchange-rate-fixing/central-bank-exchange-rate-fixing/year.txt?year=2025) | Rate of the delivery day (last fixing before it on weekends/holidays) – this reproduces OTE's own CZK prices from before Oct 2025. Your supplier may use a different rate. |
+| EUR/CZK | ČNB daily fixing, [`year.txt`](https://www.cnb.cz/en/financial-markets/foreign-exchange-market/central-bank-exchange-rate-fixing/central-bank-exchange-rate-fixing/year.txt?year=2025) | Rate valid for the delivery day: the fixing published that day (~14:30), or the last fixing before it on weekends/holidays. This is exactly OTE's own `EurRate` ("Kurz ČNB pro daný den dodávky"); see [EUR/CZK conversion](#eurczk-conversion). Your supplier may use a different rate. |
 
 All timestamps are handled in UTC internally and reported in Europe/Prague time; DST days
 (23 / 25 hours) are handled correctly.
@@ -245,7 +301,7 @@ All timestamps are handled in UTC internally and reported in Europe/Prague time;
 * **CSV** from anywhere: `;`, `,` or tab separated, decimal comma or point, UTF-8 or
   Windows-1250, dates like `01.11.2025 00:15`, `2025-11-01 00:15`, ISO 8601 with offset,
   separate date and time columns, `24:00`,
-* the tool's own CSV written by `egd-spot fetch` (`start,kwh,status`).
+* the tool's own CSV written by `egd data` (`start,kwh,status`).
 
 The header row and the date/time and consumption columns are detected automatically
 (headers such as *Datum*, *Čas*, *Spotřeba*, *ICC1*, *kWh*); override with
@@ -264,15 +320,15 @@ of DST are resolved by row order.
   Use the column options if it picks the wrong column.
 * Suppliers' exact formulas vary (exchange rate, rounding, treatment of negative prices,
   OTE fee, imbalance costs); results are an estimate, not a bill.
-* Export to the grid (profile `ISC1`) can be downloaded with `--profile ISC1`, but buy-back
-  pricing is not modelled.
+* Production / export to the grid can be downloaded with `egd data --kind production`, but
+  buy-back pricing is not modelled by `egd spot calc` yet.
 
 ## Development
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-pytest --cov=egd_spot      # all HTTP is mocked; no credentials needed
+pytest --cov=egd_api_client   # all HTTP is mocked; no credentials needed
 ruff check . && ruff format --check .
 python examples/generate_sample.py 2025-01-01 2025-12-31 > /tmp/year.csv   # synthetic data
 ```
@@ -280,18 +336,25 @@ python examples/generate_sample.py 2025-01-01 2025-12-31 > /tmp/year.csv   # syn
 Project layout:
 
 ```
-src/egd_spot/
-  cli.py             argument parsing and commands
-  egd.py             EG.D OpenAPI client (token, readings, metering points)
-  ote.py             OTE day-ahead prices (SOAP) with caching
-  cnb.py             ČNB EUR/CZK rates
-  consumption_io.py  CSV/XLSX import, canonical CSV export
-  calculator.py      cost computation and aggregation
-  tariff.py          spot / fixed tariff definitions
-  report.py          text report and CSV/JSON export
-  config.py, cache.py, timeutil.py, models.py, http.py
+src/egd_api_client/
+  client.py          EG.D OpenAPI client (token, metering points, profiles, readings)
+  readings_io.py     CSV/XLSX import, canonical CSV / JSON export
+  models.py          Reading, PricePoint, LoadResult
+  cli.py             `egd` entry point and core commands (meters, profiles, data)
+  cli_common.py      shared CLI options, period handling, context
+  config.py, cache.py, timeutil.py, http.py
+  spot/              spot-tariff feature (`egd spot …`)
+    cli.py           calc, prices, fx commands
+    ote.py           OTE day-ahead prices (SOAP) with caching
+    cnb.py           ČNB EUR/CZK rates
+    calculator.py    cost computation and aggregation
+    tariff.py        spot / fixed tariff definitions
+    report.py        text report and CSV/JSON export
 tests/               pytest suite with recorded OTE/ČNB fixtures
 ```
+
+New features go into their own subpackage with a `register(subparsers, …)` function in its
+`cli.py`, like `spot`.
 
 ## License
 
@@ -301,29 +364,42 @@ tests/               pytest suite with recorded OTE/ČNB fixtures
 
 ## Česky
 
-`egd-spot` spočítá, kolik byste zaplatili za elektřinu se **spotovým tarifem**. Stáhne vaše
-čtvrthodinová data ze smartmetru přes **OpenAPI EG.D (Distribuce24)** – nebo načte export
-z portálu (XLSX/CSV) – sám si stáhne **spotové ceny OTE** (denní trh; do 30. 9. 2025
-hodinové v CZK, od 1. 10. 2025 čtvrthodinové v EUR přepočtené kurzem ČNB) a použije vzorec
-vašeho dodavatele:
+`egd-api-client` je klient a příkazová řádka pro **OpenAPI EG.D (Distribuce24)**. Umí
+stáhnout čtvrthodinová data ze smartmetru – spotřebu i výrobu (přetoky) – do CSV/JSON
+(`egd data`) a jako první funkci nad nimi spočítat, kolik byste zaplatili za elektřinu se
+**spotovým tarifem** (`egd spot calc`). Spotové ceny si sám stáhne z **OTE** (denní trh; do
+30. 9. 2025 hodinové v CZK, od 1. 10. 2025 čtvrthodinové v EUR přepočtené **kurzem ČNB
+platným pro daný den dodávky** – o víkendu a ve svátek posledním vyhlášeným, stejně jako to
+dělá OTE) a použije vzorec vašeho dodavatele:
 
 ```
 cena = spot × koeficient + přirážka [Kč/MWh]   (+ měsíční poplatek, + DPH)
 ```
+
+| Příkaz | Co dělá |
+|---|---|
+| `egd meters` | seznam odběrných míst (EAN) dostupných pro vaše přihlašovací údaje |
+| `egd data` | export čtvrthodinové spotřeby (`--kind consumption`) nebo výroby (`--kind production`) |
+| `egd spot calc` | výpočet ceny se spotovým tarifem |
+| `egd spot prices` | spotové ceny OTE |
+| `egd spot fx` | kurz EUR/CZK použitý pro každý den |
 
 Příklad – dodavatel účtuje `spot × 1,15 + 400 Kč/MWh`, 99 Kč měsíčně, s DPH 21 %, porovnání
 s fixní cenou 3,20 Kč/kWh:
 
 ```bash
 export EGD_CLIENT_ID=...  EGD_CLIENT_SECRET=...
-egd-spot calc --ean 859182400xxxxxxxxx --from 2025-01 --to 2025-12 \
+egd spot calc --ean 859182400xxxxxxxxx --from 2025-01 --to 2025-12 \
     -m 1.15 -a 400 --monthly-fee 99 --vat --fixed-price 3.2 --breakdown month
 ```
+
+Konfigurace: `~/.config/egd-api-client/config.toml` (sekce `[egd]`, `[spot]`, `[spot.fixed]`),
+proměnné prostředí `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`.
 
 **Přístup k API:** na [portal.distribuce24.cz](https://portal.distribuce24.cz) →
 *Správa účtů → Vzdálený přístup – OpenAPI* → *Vygenerovat client_id a client_secret*.
 Funguje pro odběrná místa s měřením A, B a C1 (aktivní chytrý elektroměr). Bez API můžete
-použít export z portálu: `egd-spot calc --input export.xlsx ...`.
+použít export z portálu: `egd spot calc --input export.xlsx ...`.
 
 **Záporné ceny:** `--negative as-is` (výchozí, vzorec beze změny – záporná cena snižuje
 účet), `clamp-spot` (záporný spot = 0), `clamp-total` (výsledná cena nikdy pod 0).

@@ -7,9 +7,9 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from typing import Literal
 
-from egd_spot.models import PricePoint, Reading
-from egd_spot.tariff import FixedTariff, SpotTariff
-from egd_spot.timeutil import (
+from egd_api_client.models import PricePoint, Reading
+from egd_api_client.spot.tariff import FixedTariff, SpotTariff
+from egd_api_client.timeutil import (
     QUARTER,
     days_in_month,
     iter_days,

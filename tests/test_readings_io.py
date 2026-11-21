@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from egd_spot.consumption_io import (
+from egd_api_client.models import Reading
+from egd_api_client.readings_io import (
     FileOptions,
     InputFormatError,
     load_file,
     parse_rows,
     write_canonical_csv,
 )
-from egd_spot.models import Reading
 
 
 def write(tmp_path: Path, text: str, name: str = "c.csv", encoding: str = "utf-8") -> Path:

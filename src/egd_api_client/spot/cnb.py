@@ -15,8 +15,8 @@ from datetime import date, datetime
 
 import requests
 
-from egd_spot.cache import JsonCache
-from egd_spot.http import DEFAULT_TIMEOUT, FetchError
+from egd_api_client.cache import JsonCache
+from egd_api_client.http import DEFAULT_TIMEOUT, FetchError
 
 CNB_YEAR_URL = (
     "https://www.cnb.cz/en/financial-markets/foreign-exchange-market/"
@@ -85,12 +85,21 @@ class CnbRates:
         self._years[year] = cached
         return cached
 
-    def eur_czk(self, day: date) -> float:
-        """EUR/CZK fixing valid for ``day`` (last fixing on or before it)."""
+    def fixing(self, day: date) -> tuple[date, float]:
+        """(fixing date, EUR/CZK) valid for ``day``.
+
+        ČNB fixes rates every business day at ~14:30, valid for that day and any following
+        weekend/holiday. OTE's ``GetDamIndexE.EurRate`` ("kurz ČNB pro daný den dodávky")
+        equals exactly this value (checked for every day 2025-01..2026-11).
+        """
         for year in (day.year, day.year - 1):
             rates = self._load_year(year, need=day if year == day.year else None)
             keys = sorted(rates)
             i = bisect.bisect_right(keys, day.isoformat())
             if i:
-                return rates[keys[i - 1]]
+                return date.fromisoformat(keys[i - 1]), rates[keys[i - 1]]
         raise FetchError(f"No ČNB EUR/CZK rate found on or before {day}")
+
+    def eur_czk(self, day: date) -> float:
+        """EUR/CZK fixing valid for ``day`` (last fixing on or before it)."""
+        return self.fixing(day)[1]

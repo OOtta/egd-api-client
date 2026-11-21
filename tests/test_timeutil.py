@@ -1,6 +1,6 @@
 from datetime import UTC, date, datetime
 
-from egd_spot.timeutil import (
+from egd_api_client.timeutil import (
     HOUR,
     QUARTER,
     days_in_month,

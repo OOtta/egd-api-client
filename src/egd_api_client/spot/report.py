@@ -8,9 +8,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TextIO
 
-from egd_spot.calculator import Result
-from egd_spot.models import PricePoint
-from egd_spot.timeutil import to_local
+from egd_api_client.models import PricePoint
+from egd_api_client.spot.calculator import Result
+from egd_api_client.timeutil import to_local
 
 
 def fmt(v: float | None, decimals: int = 2) -> str:

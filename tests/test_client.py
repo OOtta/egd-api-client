@@ -5,7 +5,7 @@ import pytest
 import requests
 import responses
 
-from egd_spot.egd import (
+from egd_api_client.client import (
     PROD_DATA_URL,
     PROD_TOKEN_URL,
     TEST_DATA_URL,
@@ -15,7 +15,7 @@ from egd_spot.egd import (
     EgdCredentials,
     parse_readings,
 )
-from egd_spot.timeutil import QUARTER, local_day_bounds_utc, parse_iso_utc
+from egd_api_client.timeutil import QUARTER, local_day_bounds_utc, parse_iso_utc
 
 CREDS = EgdCredentials("dummy-id", "dummy-secret")
 
@@ -220,7 +220,7 @@ def test_non_final_status_warning(mocked):
 
 
 def test_truncated_response_is_continued_from_last_timestamp(mocked, monkeypatch):
-    import egd_spot.egd as egd
+    import egd_api_client.client as egd
 
     monkeypatch.setattr(egd, "TRUNCATION_THRESHOLD", 3)
     _token(mocked)
@@ -262,7 +262,7 @@ def test_access_window_is_detected(mocked):
 
 
 def test_api_error_message_is_surfaced(mocked):
-    from egd_spot.egd import EgdRequestError
+    from egd_api_client.client import EgdRequestError
 
     _token(mocked)
     msg = 'Datum "from" nesmí být starší než 3 roky.'

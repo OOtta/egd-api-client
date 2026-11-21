@@ -1,6 +1,6 @@
 import pytest
 
-from egd_spot.tariff import SpotTariff
+from egd_api_client.spot.tariff import SpotTariff
 
 
 def test_formula_multiplier_and_surcharge():

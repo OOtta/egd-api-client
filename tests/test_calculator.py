@@ -2,10 +2,10 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from egd_spot.calculator import PriceLookup, compute
-from egd_spot.models import PricePoint, Reading
-from egd_spot.tariff import FixedTariff, SpotTariff
-from egd_spot.timeutil import HOUR, QUARTER, local_day_bounds_utc
+from egd_api_client.models import PricePoint, Reading
+from egd_api_client.spot.calculator import PriceLookup, compute
+from egd_api_client.spot.tariff import FixedTariff, SpotTariff
+from egd_api_client.timeutil import HOUR, QUARTER, local_day_bounds_utc
 
 DAY = date(2025, 11, 3)
 

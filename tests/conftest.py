@@ -9,10 +9,10 @@ import pytest
 import requests
 import responses
 
-from egd_spot.cache import JsonCache
-from egd_spot.cnb import CNB_YEAR_URL, CnbRates
-from egd_spot.ote import NS, OTE_SERVICE_URL, QUARTER_HOUR_MARKET_START, OteClient
-from egd_spot.timeutil import local_day_bounds_utc
+from egd_api_client.cache import JsonCache
+from egd_api_client.spot.cnb import CNB_YEAR_URL, CnbRates
+from egd_api_client.spot.ote import NS, OTE_SERVICE_URL, QUARTER_HOUR_MARKET_START, OteClient
+from egd_api_client.timeutil import local_day_bounds_utc
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

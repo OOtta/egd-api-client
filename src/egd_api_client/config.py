@@ -13,7 +13,7 @@ from typing import Any
 ENV_CLIENT_ID = "EGD_CLIENT_ID"
 ENV_CLIENT_SECRET = "EGD_CLIENT_SECRET"
 ENV_EAN = "EGD_EAN"
-ENV_CONFIG = "EGD_SPOT_CONFIG"
+ENV_CONFIG = "EGD_CONFIG"
 
 
 def default_config_path() -> Path:
@@ -21,7 +21,7 @@ def default_config_path() -> Path:
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
     else:
         base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / "egd-spot" / "config.toml"
+    return base / "egd-api-client" / "config.toml"
 
 
 class ConfigError(ValueError):
@@ -31,8 +31,8 @@ class ConfigError(ValueError):
 @dataclass(slots=True)
 class Config:
     egd: dict[str, Any] = field(default_factory=dict)
-    tariff: dict[str, Any] = field(default_factory=dict)
-    fixed: dict[str, Any] = field(default_factory=dict)
+    spot: dict[str, Any] = field(default_factory=dict)  # [spot] – tariff defaults
+    fixed: dict[str, Any] = field(default_factory=dict)  # [spot.fixed] – comparison tariff
     path: Path | None = None
     warnings: list[str] = field(default_factory=list)
 
@@ -60,8 +60,8 @@ KNOWN = {
         "api_variant",
         "timestamps",
     },
-    "tariff": {"multiplier", "add_czk_mwh", "monthly_fee", "vat", "negative", "price_resolution"},
-    "fixed": {"price_czk_kwh", "monthly_fee"},
+    "spot": {"multiplier", "add_czk_mwh", "monthly_fee", "vat", "negative", "price_resolution"},
+    "spot.fixed": {"price_czk_kwh", "monthly_fee"},
 }
 
 
@@ -80,16 +80,19 @@ def load_config(path: Path | None = None) -> Config:
 
     cfg = Config(path=path)
     for section, keys in KNOWN.items():
-        sec = data.get(section, {})
+        sec: Any = data
+        for part in section.split("."):
+            sec = sec.get(part, {}) if isinstance(sec, dict) else None
         if not isinstance(sec, dict):
             raise ConfigError(f"{path}: [{section}] must be a table")
-        unknown = set(sec) - keys
+        values = {k: v for k, v in sec.items() if not isinstance(v, dict)}
+        unknown = set(values) - keys
         if unknown:
             cfg.warnings.append(
                 f"{path}: unknown keys in [{section}]: {', '.join(sorted(unknown))}"
             )
-        setattr(cfg, section, dict(sec))
-    for section in set(data) - set(KNOWN):
+        setattr(cfg, "fixed" if section == "spot.fixed" else section, values)
+    for section in set(data) - {s.split(".")[0] for s in KNOWN}:
         cfg.warnings.append(f"{path}: unknown section [{section}]")
 
     if cfg.egd.get("client_secret") and os.name == "posix":

@@ -3,15 +3,15 @@ requires = ["hatchling>=1.24"]
 build-backend = "hatchling.build"
 
 [project]
-name = "egd-spot-calc"
+name = "egd-api-client"
 version = "0.1.0"
-description = "Compute what your electricity would have cost on a Czech spot-price tariff, using EG.D (E.ON Distribuce) smart-meter data and OTE day-ahead prices."
+description = "Client library and CLI for the EG.D (E.ON Distribuce) Distribuce24 OpenAPI: metering data export and spot-price cost calculation with OTE day-ahead prices."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
-authors = [{ name = "egd-spot-calc contributors" }]
-keywords = ["electricity", "spot price", "OTE", "EGD", "E.ON Distribuce", "smart meter", "Czech"]
+authors = [{ name = "egd-api-client contributors" }]
+keywords = ["electricity", "API client", "Distribuce24", "spot price", "OTE", "EGD", "E.ON Distribuce", "smart meter", "Czech"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -40,14 +40,14 @@ dev = [
 ]
 
 [project.scripts]
-egd-spot = "egd_spot.cli:main"
+egd = "egd_api_client.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/OWNER/egd-spot-calc"
-Issues = "https://github.com/OWNER/egd-spot-calc/issues"
+Homepage = "https://github.com/OWNER/egd-api-client"
+Issues = "https://github.com/OWNER/egd-api-client/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/egd_spot"]
+packages = ["src/egd_api_client"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

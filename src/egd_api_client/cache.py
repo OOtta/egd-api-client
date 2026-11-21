@@ -10,14 +10,14 @@ from typing import Any
 
 
 def default_cache_dir() -> Path:
-    env = os.environ.get("EGD_SPOT_CACHE_DIR")
+    env = os.environ.get("EGD_CACHE_DIR")
     if env:
         return Path(env).expanduser()
     if sys.platform == "win32":
         base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
     else:
         base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    return base / "egd-spot"
+    return base / "egd-api-client"
 
 
 class JsonCache:

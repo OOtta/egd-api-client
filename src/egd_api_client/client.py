@@ -47,9 +47,9 @@ from typing import Any, Literal
 
 import requests
 
-from egd_spot.http import DEFAULT_TIMEOUT, FetchError
-from egd_spot.models import LoadResult, Reading
-from egd_spot.timeutil import (
+from egd_api_client.http import DEFAULT_TIMEOUT, FetchError
+from egd_api_client.models import LoadResult, Reading
+from egd_api_client.timeutil import (
     QUARTER,
     format_api_utc,
     local_date,
@@ -65,10 +65,16 @@ SCOPE = "namerena_data_openapi"
 
 DEFAULT_PROFILE = "ICC1"  # measurement types A, B
 C1_PROFILE = "DCQC"  # measurement type C1 (smart meter): "Spotřeba energie odebrané ze sítě"
+PROFILES = {
+    (False, "consumption"): DEFAULT_PROFILE,
+    (False, "production"): "ISC1",  # export to the grid (přetok), mean kW
+    (True, "consumption"): C1_PROFILE,
+    (True, "production"): "DSQC",  # "Energie dodávky do sítě (přetok) - C1", kWh
+}
 MAX_PAGES = 10
 TRUNCATION_THRESHOLD = 2900  # a response this long may have hit the 3000-value cap
 C1_LEGACY_PROFILE = "0.0.2.4.1.2.12.0.0.0.0.0.0.0.0.3.72.0"  # "Spotřeba energie celkem (kWh)"
-POWER_PROFILES = frozenset({"ICC1", "ISC1", "IKC1", "IMC1"})  # mean kW / kVAr per 15 min
+POWER_PROFILES = frozenset({"ICC1", "ISC1", "IKC1", "IKC2", "IMC1"})  # mean kW / kVAr per 15 min
 # final values per /rest/statusy: W valid; B, E, M, N substitute but final ("náhradní platná");
 # G, V are temporary substitutes, F missing. IU012 = valid in the older A/B code list.
 VALID_STATUSES = frozenset({"W", "B", "E", "M", "N", "IU012"})
@@ -76,6 +82,7 @@ CHUNK = timedelta(days=30)  # 30 × 96 (+4 on DST) < 3000 records
 
 ApiVariant = Literal["rest", "c1-legacy"]
 TimestampConvention = Literal["start", "end"]
+Kind = Literal["consumption", "production"]
 
 
 class EgdAuthError(FetchError):
@@ -199,24 +206,21 @@ class EgdClient:
     def profiles(self, variant: ApiVariant = "rest") -> list[dict[str, Any]]:
         return self._get("c/profily" if variant == "c1-legacy" else "profily")
 
-    def default_profile(self, ean: str) -> str:
-        """Consumption profile matching the metering point's measurement type.
+    def default_profile(self, ean: str, kind: Kind = "consumption") -> str:
+        """Profile matching the metering point's measurement type.
 
-        ``/rest/profily`` lists ``ICC1``/``ICQ2`` for types A and B and ``DCQC`` for C1
-        (smart meters); requesting the wrong one returns an empty data set.
+        ``/rest/profily`` lists ``ICC1``/``ISC1`` (power) and ``ICQ2``/``ISQ2`` (energy) for
+        types A and B and ``DCQC``/``DSQC`` for C1 smart meters; requesting a profile of the
+        wrong type returns an empty data set.
         """
+        c1 = False
         try:
-            points = self.metering_points()
+            for p in self.metering_points():
+                if str(p.get("ean")) == str(ean):
+                    c1 = str(p.get("typMereni", "")).upper().startswith("C")
         except FetchError:
-            return DEFAULT_PROFILE
-        for p in points:
-            if str(p.get("ean")) == str(ean):
-                return (
-                    C1_PROFILE
-                    if str(p.get("typMereni", "")).upper().startswith("C")
-                    else (DEFAULT_PROFILE)
-                )
-        return DEFAULT_PROFILE
+            pass
+        return PROFILES[(c1, kind)]
 
     def readings(
         self,
@@ -229,6 +233,7 @@ class EgdClient:
         data_source: str = "ODBERNE_MISTO",
         timestamps: TimestampConvention | None = None,
         today: date | None = None,
+        kind: Kind = "consumption",
     ) -> LoadResult:
         """Download readings for the UTC half-open range [start, end).
 
@@ -249,7 +254,7 @@ class EgdClient:
             profile = profile or C1_LEGACY_PROFILE
             ts_conv: TimestampConvention = timestamps or "end"
         else:
-            profile = profile or self.default_profile(ean)
+            profile = profile or self.default_profile(ean, kind)
             ts_conv = timestamps or "start"
 
         readings: dict[datetime, Reading] = {}

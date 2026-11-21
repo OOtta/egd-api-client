@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import requests
 
-from egd_spot import __version__
+from egd_api_client._version import __version__
 
-USER_AGENT = f"egd-spot-calc/{__version__} (+https://github.com/OWNER/egd-spot-calc)"
+USER_AGENT = f"egd-api-client/{__version__} (+https://github.com/OWNER/egd-api-client)"
 DEFAULT_TIMEOUT = 60
 
 

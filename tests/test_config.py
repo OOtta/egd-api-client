@@ -2,12 +2,12 @@ import os
 
 import pytest
 
-from egd_spot.config import ConfigError, load_config
+from egd_api_client.config import ConfigError, load_config
 
 
 def test_missing_default_config_is_fine(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    monkeypatch.delenv("EGD_SPOT_CONFIG", raising=False)
+    monkeypatch.delenv("EGD_CONFIG", raising=False)
     assert load_config().path is None
 
 
@@ -33,7 +33,7 @@ def test_env_overrides_file(tmp_path, monkeypatch):
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permissions")
 def test_world_readable_secret_warns(tmp_path):
     p = tmp_path / "c.toml"
-    p.write_text('[egd]\nclient_secret = "s"\n[tariff]\nfoo = 1\n')
+    p.write_text('[egd]\nclient_secret = "s"\n[spot]\nfoo = 1\n')
     p.chmod(0o644)
     cfg = load_config(p)
     assert any("chmod 600" in w for w in cfg.warnings)

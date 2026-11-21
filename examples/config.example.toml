@@ -1,5 +1,5 @@
-# egd-spot configuration example.
-# Copy to ~/.config/egd-spot/config.toml (Linux/macOS) or %APPDATA%\egd-spot\config.toml
+# egd-api-client configuration example.
+# Copy to ~/.config/egd-api-client/config.toml (Linux/macOS) or %APPDATA%\egd-api-client\config.toml
 # (Windows) and `chmod 600` it if you store the client secret here.
 # Every value can be overridden on the command line; credentials also via the
 # environment variables EGD_CLIENT_ID / EGD_CLIENT_SECRET / EGD_EAN.
@@ -9,12 +9,13 @@
 client_id = "your-client-id"
 client_secret = "your-client-secret"
 ean = "859182400xxxxxxxxx"
-# profile = "ICC1"          # ICC1 = consumption (mean kW, converted to kWh); ICQ2 = kWh
+# profile = "ICC1"          # consumption profile; default by meter type (ICC1 for A/B, DCQC for C1)
 # api_variant = "rest"      # "rest" (unified /rest/spotreby) or "c1-legacy" (/rest/c/spotreby)
 # timestamps = "start"      # do API timestamps mark the interval start or end?
 # test_env = false          # use test.distribuce24.cz
 
-[tariff]
+# ---- `egd spot …` --------------------------------------------------------------
+[spot]
 # effective energy price = spot × multiplier + add_czk_mwh
 multiplier = 1.0
 add_czk_mwh = 400           # supplier margin in CZK/MWh (excl. VAT)
@@ -24,6 +25,6 @@ negative = "as-is"          # "as-is" | "clamp-spot" | "clamp-total"
 price_resolution = "auto"   # "auto" (15-min prices from 2025-10-01) | "hourly"
 
 # Optional comparison with a fixed-price product
-[fixed]
+[spot.fixed]
 price_czk_kwh = 3.20        # excl. VAT
 monthly_fee = 120

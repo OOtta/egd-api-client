@@ -3,8 +3,8 @@ from datetime import UTC, date, datetime
 import pytest
 
 from conftest import FIXTURES, FakeOte, add_cnb, add_ote
-from egd_spot.ote import _chunks, parse_items
-from egd_spot.timeutil import HOUR, QUARTER
+from egd_api_client.spot.ote import _chunks, parse_items
+from egd_api_client.timeutil import HOUR, PRAGUE, QUARTER
 
 
 def test_parse_real_hourly_response_dst_start():
@@ -23,7 +23,7 @@ def test_parse_real_15min_response_dst_end():
 
 
 def test_soap_fault_raises():
-    from egd_spot.http import FetchError
+    from egd_api_client.http import FetchError
 
     xml = (
         '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body>'
@@ -43,8 +43,8 @@ def test_chunks_split_at_month_boundaries_and_gaps():
 
 
 def test_http_500_soap_fault_is_reported(mocked, ote_client):
-    from egd_spot.http import FetchError
-    from egd_spot.ote import OTE_SERVICE_URL
+    from egd_api_client.http import FetchError
+    from egd_api_client.spot.ote import OTE_SERVICE_URL
 
     fault = (
         '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body>'
@@ -110,7 +110,7 @@ def test_incomplete_days_are_not_cached(mocked, ote_client):
 
 
 def test_emergency_periods_are_skipped_but_day_is_cached(mocked, ote_client):
-    from egd_spot.ote import NS, OTE_SERVICE_URL
+    from egd_api_client.spot.ote import NS, OTE_SERVICE_URL
 
     items = "".join(
         f"<Item><Date>2025-07-04</Date><Hour>{h}</Hour><Price>1000.00</Price></Item>"
@@ -129,3 +129,25 @@ def test_emergency_periods_are_skipped_but_day_is_cached(mocked, ote_client):
     assert ote_client.unpriced == {date(2025, 7, 4): 12}
     ote_client.prices(date(2025, 7, 4), date(2025, 7, 4))
     assert len(mocked.calls) == 1  # complete day (incl. emergency markers) was cached
+
+
+def test_quarter_era_rate_follows_each_delivery_day(mocked, ote_client):
+    """A flat 100 EUR/MWh price must be converted with each day's own ČNB rate:
+    Fri 24.10. → 24.340, Sat/Sun → Friday's 24.340, Mon 27.10. → 24.325,
+    Tue 28.10. (holiday) → Monday's 24.325, Wed 29.10. → 24.335."""
+    add_cnb(mocked)
+    add_ote(mocked, FakeOte(lambda d, i: 100.0))
+    points = ote_client.prices(date(2025, 10, 24), date(2025, 10, 29))
+    by_day: dict[str, set[float]] = {}
+    for p in points:
+        by_day.setdefault(str(p.start.astimezone(PRAGUE).date()), set()).add(round(p.czk_mwh, 3))
+    assert by_day == {
+        "2025-10-24": {2434.0},
+        "2025-10-25": {2434.0},
+        "2025-10-26": {2434.0},
+        "2025-10-27": {2432.5},
+        "2025-10-28": {2432.5},
+        "2025-10-29": {2433.5},
+    }
+    rates = {p.eur_czk for p in points if p.start.astimezone(PRAGUE).date() == date(2025, 10, 28)}
+    assert len(rates) == 1 and rates.pop() == pytest.approx(24.325)

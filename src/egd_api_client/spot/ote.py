@@ -8,7 +8,7 @@ Manual:  https://www.ote-cr.cz/cs/dokumentace/xsd-wsdl-manual-pubweb
   OTE's official CZK/MWh values directly.
 * Delivery days from 2025-10-01 (15-minute day-ahead market): ``GetDamPricePeriodE`` with
   ``PeriodResolution=PT15M`` – 15-minute ``Price`` and the hourly ``HourlyPrice`` in EUR/MWh.
-  Converted to CZK with the ČNB fixing for the delivery day (see :mod:`egd_spot.cnb`).
+  Converted to CZK with the ČNB fixing for the delivery day (see :mod:`egd_api_client.spot.cnb`).
 
 Requests are limited to one calendar month; periods are numbered from local
 midnight (23/25 hours or 92/100 quarter-hours on DST days).
@@ -23,11 +23,11 @@ from typing import Literal
 
 import requests
 
-from egd_spot.cache import JsonCache
-from egd_spot.cnb import CnbRates
-from egd_spot.http import DEFAULT_TIMEOUT, FetchError
-from egd_spot.models import PricePoint
-from egd_spot.timeutil import HOUR, QUARTER, iter_days, period_start_utc
+from egd_api_client.cache import JsonCache
+from egd_api_client.http import DEFAULT_TIMEOUT, FetchError
+from egd_api_client.models import PricePoint
+from egd_api_client.spot.cnb import CnbRates
+from egd_api_client.timeutil import HOUR, QUARTER, iter_days, period_start_utc
 
 OTE_SERVICE_URL = "https://www.ote-cr.cz/pw-data/services/PublicDataService"
 NS = "http://www.ote-cr.cz/schema/service/public"

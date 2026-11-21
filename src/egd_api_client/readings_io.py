@@ -2,7 +2,7 @@
 
 Supported inputs:
 
-* the tool's own canonical CSV (written by ``egd-spot fetch``):
+* the tool's own canonical CSV (written by ``egd data``):
   ``start,kwh,status`` with ISO-8601 timestamps including UTC offset;
 * generic CSV exported from a portal or spreadsheet (``;`` / ``,`` / tab separated,
   decimal comma or point, Czech or ISO date formats);
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -23,8 +24,8 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any, Literal
 
-from egd_spot.models import LoadResult, Reading
-from egd_spot.timeutil import PRAGUE, QUARTER, to_local
+from egd_api_client.models import LoadResult, Reading
+from egd_api_client.timeutil import PRAGUE, QUARTER, to_local
 
 Unit = Literal["auto", "kwh", "kw"]
 Convention = Literal["auto", "start", "end"]
@@ -88,6 +89,15 @@ def write_canonical_csv(readings: Iterable[Reading], path: Path | io.TextIOBase)
         _write(path)
 
 
+def write_json(readings: Iterable[Reading], fh: io.TextIOBase) -> None:
+    """Write readings as a JSON list of ``{"start", "kwh", "status"}`` objects."""
+    data = [
+        {"start": to_local(r.start).isoformat(), "kwh": r.kwh, "status": r.status} for r in readings
+    ]
+    json.dump(data, fh, ensure_ascii=False, indent=1)
+    fh.write("\n")
+
+
 # ---------------------------------------------------------------------------------------------
 # readers
 # ---------------------------------------------------------------------------------------------
@@ -115,7 +125,7 @@ def _read_xlsx(path: Path, sheet: str | None) -> list[list[Any]]:
         import openpyxl
     except ImportError as exc:  # pragma: no cover - depends on environment
         raise InputFormatError(
-            "Reading .xlsx needs openpyxl: pipx install 'egd-spot-calc[xlsx]' "
+            "Reading .xlsx needs openpyxl: pipx install 'egd-api-client[xlsx]' "
             "(or pip install openpyxl). Alternatively save the sheet as CSV."
         ) from exc
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)

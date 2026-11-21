@@ -1,0 +1,300 @@
+"""``egd spot …`` – spot-price commands (``calc``, ``prices``, ``fx``)."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+from egd_api_client.cli_common import (
+    CliError,
+    Context,
+    clamp_to_yesterday,
+    first,
+    info,
+    resolve_period,
+    warn,
+)
+from egd_api_client.config import Config
+from egd_api_client.readings_io import FileOptions, load_file
+from egd_api_client.spot.calculator import compute
+from egd_api_client.spot.cnb import CnbRates
+from egd_api_client.spot.ote import QUARTER_HOUR_MARKET_START, OteClient
+from egd_api_client.spot.report import (
+    export_intervals,
+    export_prices,
+    export_result,
+    fmt,
+    render_breakdown,
+    render_summary,
+)
+from egd_api_client.spot.tariff import FixedTariff, SpotTariff
+from egd_api_client.timeutil import iter_days, local_date
+
+
+class SpotContext(Context):
+    def __init__(self, args: argparse.Namespace) -> None:
+        super().__init__(args)
+        self.cnb = CnbRates(self.session, self.cache)
+        self.ote = OteClient(self.session, self.cache, self.cnb)
+
+    def warn_unpriced(self) -> None:
+        for d, n in sorted(self.ote.unpriced.items()):
+            warn(
+                f"OTE published no market price for {n} period(s) on {d} (emergency state / "
+                "stav nouze); consumption in those periods is excluded from the cost."
+            )
+
+
+def build_tariff(args: argparse.Namespace, cfg: Config) -> SpotTariff:
+    t = cfg.spot
+    vat = args.vat if args.vat is not None else t.get("vat", 0.0)
+    if vat is True:
+        vat = 21.0
+    return SpotTariff(
+        multiplier=float(first(args.multiplier, t.get("multiplier"), 1.0)),
+        add_czk_mwh=float(first(args.add_czk_mwh, t.get("add_czk_mwh"), 0.0)),
+        monthly_fee=float(first(args.monthly_fee, t.get("monthly_fee"), 0.0)),
+        vat_percent=float(vat or 0.0),
+        negative=first(args.negative, t.get("negative"), "as-is"),
+    )
+
+
+def build_fixed(args: argparse.Namespace, cfg: Config) -> FixedTariff | None:
+    price = first(args.fixed_price, cfg.fixed.get("price_czk_kwh"))
+    if price is None:
+        return None
+    fee = first(args.fixed_monthly_fee, cfg.fixed.get("monthly_fee"), 0.0)
+    return FixedTariff(float(price), float(fee))
+
+
+def file_options(args: argparse.Namespace) -> FileOptions:
+    return FileOptions(
+        time_column=args.time_column,
+        value_column=args.value_column,
+        unit=args.unit,
+        timestamps=args.timestamps,
+        interval_minutes=args.interval_minutes,
+        sheet=args.sheet,
+    )
+
+
+# ------------------------------------------------------------------------------------------
+# commands
+# ------------------------------------------------------------------------------------------
+def cmd_calc(args: argparse.Namespace) -> int:
+    ctx = SpotContext(args)
+    tariff = build_tariff(args, ctx.cfg)
+    fixed = build_fixed(args, ctx.cfg)
+
+    if args.input:
+        data = load_file(Path(args.input), file_options(args))
+        start, end = resolve_period(args, data)
+        info(f"Loaded {len(data.readings)} readings from {args.input}", args.json)
+    else:
+        start, end = clamp_to_yesterday(*resolve_period(args))
+        info(f"Downloading EG.D data {start} – {end} ...", args.json)
+        data = ctx.egd_readings(start, end)
+        if data.available_from is not None:
+            start = max(start, local_date(data.available_from))
+    for w in data.warnings:
+        warn(w)
+    if end >= date.today():
+        warn("The period includes today or future days; data and prices may be incomplete.")
+
+    resolution = args.price_resolution or ctx.cfg.spot.get("price_resolution", "auto")
+    info(f"Downloading OTE spot prices {start} – {end} ...", args.json)
+    prices = ctx.ote.prices(start, end, resolution)
+    if not prices:
+        raise CliError("No spot prices available for the selected period.")
+    ctx.warn_unpriced()
+
+    res = compute(data.readings, prices, tariff, start, end, fixed=fixed, breakdown=args.breakdown)
+    for w in res.warnings:
+        warn(w)
+
+    if args.json:
+        print(json.dumps(res.as_dict(), ensure_ascii=False, indent=2))
+    else:
+        render_summary(res, sys.stdout)
+        render_breakdown(res, sys.stdout)
+    if args.export:
+        export_result(res, Path(args.export))
+        info(f"Wrote {args.export}", args.json)
+    if args.intervals:
+        export_intervals(res, Path(args.intervals))
+        info(f"Wrote {args.intervals}", args.json)
+    return 0
+
+
+def cmd_prices(args: argparse.Namespace) -> int:
+    ctx = SpotContext(args)
+    start, end = resolve_period(args)
+    points = ctx.ote.prices(start, end, args.price_resolution or "auto")
+    if not points:
+        raise CliError("No spot prices available for the selected period.")
+    ctx.warn_unpriced()
+    vals = [p.czk_mwh for p in points]
+    neg = sum(1 for v in vals if v < 0)
+    summary = {
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "points": len(points),
+        "avg_czk_mwh": round(sum(vals) / len(vals), 2),
+        "min_czk_mwh": round(min(vals), 2),
+        "max_czk_mwh": round(max(vals), 2),
+        "negative_points": neg,
+    }
+    if args.json:
+        print(json.dumps(summary, indent=2))
+    else:
+        print(f"Spot prices {start} – {end}: {len(points)} periods")
+        print(f"  average {fmt(summary['avg_czk_mwh'])} CZK/MWh")
+        print(f"  min     {fmt(summary['min_czk_mwh'])} CZK/MWh")
+        print(f"  max     {fmt(summary['max_czk_mwh'])} CZK/MWh")
+        print(f"  negative periods: {neg}")
+    if args.export:
+        export_prices(points, Path(args.export))
+        info(f"Wrote {args.export}", args.json)
+    return 0
+
+
+def cmd_fx(args: argparse.Namespace) -> int:
+    """List the EUR/CZK rate applied to each delivery day."""
+    ctx = SpotContext(args)
+    start, end = resolve_period(args)
+    rows: list[dict[str, Any]] = []
+    for d in iter_days(start, end):
+        if d < QUARTER_HOUR_MARKET_START:
+            rows.append(
+                {
+                    "day": d.isoformat(),
+                    "eur_czk": None,
+                    "fixing_date": None,
+                    "note": "hourly era: OTE publishes CZK prices directly",
+                }
+            )
+            continue
+        fixing_day, rate = ctx.cnb.fixing(d)
+        rows.append(
+            {
+                "day": d.isoformat(),
+                "eur_czk": rate,
+                "fixing_date": fixing_day.isoformat(),
+                "note": "" if fixing_day == d else "no fixing that day → last fixing before",
+            }
+        )
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 0
+    print("delivery day     EUR/CZK  ČNB fixing of")
+    for r in rows:
+        day = date.fromisoformat(r["day"])
+        rate = "–" if r["eur_czk"] is None else f"{r['eur_czk']:.3f}"
+        print(f"{r['day']} {day:%a}  {rate:>7}  {r['fixing_date'] or '–'}  {r['note']}")
+    return 0
+
+
+# ------------------------------------------------------------------------------------------
+# parser
+# ------------------------------------------------------------------------------------------
+def register(
+    sub: Any,
+    *,
+    common: argparse.ArgumentParser,
+    period: argparse.ArgumentParser,
+    egd: argparse.ArgumentParser,
+) -> None:
+    spot = sub.add_parser(
+        "spot",
+        help="spot-price tools: cost calculation, OTE prices, EUR/CZK rates",
+        description="What would your electricity have cost on a spot-price tariff?",
+    )
+    ssub = spot.add_subparsers(dest="spot_command", required=True, metavar="COMMAND")
+
+    c = ssub.add_parser(
+        "calc",
+        parents=[common, period, egd],
+        help="compute the cost of your consumption on a spot tariff",
+        description="Compute the cost of your consumption on a spot tariff. Consumption comes "
+        "from the EG.D API (--ean / EGD_EAN) or from a file (--input).",
+    )
+    src = c.add_argument_group("consumption file (alternative to the API)")
+    src.add_argument("-i", "--input", metavar="FILE", help="CSV or XLSX with consumption")
+    src.add_argument("--time-column", help="name or 0-based index of the date/time column")
+    src.add_argument("--value-column", help="name or 0-based index of the consumption column")
+    src.add_argument(
+        "--unit",
+        choices=["auto", "kwh", "kw"],
+        default="auto",
+        help="unit of the values (kw = mean power, converted to energy)",
+    )
+    src.add_argument(
+        "--timestamps",
+        choices=["auto", "start", "end"],
+        default="auto",
+        help="timestamps mark the interval start or end (auto: detect)",
+    )
+    src.add_argument("--interval-minutes", type=int, help="interval length (default: detect)")
+    src.add_argument("--sheet", help="XLSX sheet name (default: first)")
+
+    t = c.add_argument_group("spot tariff")
+    t.add_argument("-m", "--multiplier", type=float, help="spot price multiplier, e.g. 1.15")
+    t.add_argument(
+        "-a",
+        "--add-czk-mwh",
+        type=float,
+        metavar="CZK",
+        help="fixed surcharge added to the spot price, CZK/MWh, e.g. 400",
+    )
+    t.add_argument("--monthly-fee", type=float, metavar="CZK", help="supplier fee CZK/month")
+    t.add_argument(
+        "--vat",
+        nargs="?",
+        type=float,
+        const=21.0,
+        metavar="PCT",
+        help="add VAT (default 21 %% when given without a value)",
+    )
+    t.add_argument(
+        "--negative",
+        choices=["as-is", "clamp-spot", "clamp-total"],
+        help="treatment of negative spot prices (default: as-is)",
+    )
+    t.add_argument(
+        "--price-resolution",
+        choices=["auto", "hourly"],
+        help="auto = 15-min prices where available (from 2025-10-01); hourly = always",
+    )
+
+    f = c.add_argument_group("comparison")
+    f.add_argument(
+        "--fixed-price",
+        type=float,
+        metavar="CZK_KWH",
+        help="compare with a fixed price per kWh (excl. VAT)",
+    )
+    f.add_argument(
+        "--fixed-monthly-fee", type=float, metavar="CZK", help="monthly fee of the fixed tariff"
+    )
+
+    o = c.add_argument_group("output")
+    o.add_argument("-b", "--breakdown", choices=["none", "day", "month"], default="none")
+    o.add_argument("-o", "--export", metavar="FILE", help="write results to .csv or .json")
+    o.add_argument("--intervals", metavar="FILE", help="write per-interval details to CSV")
+    c.set_defaults(func=cmd_calc)
+
+    pr = ssub.add_parser("prices", parents=[common, period], help="download/show OTE spot prices")
+    pr.add_argument("--price-resolution", choices=["auto", "hourly"])
+    pr.add_argument("-o", "--export", metavar="FILE", help="write prices to .csv or .json")
+    pr.set_defaults(func=cmd_prices)
+
+    fx = ssub.add_parser(
+        "fx",
+        parents=[common, period],
+        help="show the ČNB EUR/CZK rate applied to each delivery day",
+    )
+    fx.set_defaults(func=cmd_fx)
