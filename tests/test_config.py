@@ -22,6 +22,7 @@ def test_env_overrides_file(tmp_path, monkeypatch):
     p.chmod(0o600)
     monkeypatch.setenv("EGD_CLIENT_ID", "env-id")
     monkeypatch.delenv("EGD_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("EGD_EAN", raising=False)
     cfg = load_config(p)
     assert cfg.client_id == "env-id"
     assert cfg.client_secret == "file-secret"

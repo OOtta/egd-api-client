@@ -14,7 +14,7 @@ Summary of the documented interface:
   The token is valid until midnight of the day it was issued.
 * ``GET https://data.distribuce24.cz/rest/spotreby?ean=…&profile=ICC1&from=…&to=…``
   (``Authorization: Bearer <token>``; times in UTC, ``YYYY-MM-DDTHH:MM:00.000Z``; max 3000
-  records per call, optional ``pageStart`` (≥1) / ``pageSize`` (≤3000)).
+  records per call, optional ``pageStart`` / ``pageSize`` – not used, see below).
 * ``GET https://data.distribuce24.cz/rest/om`` – metering points available to the credentials.
 * Profiles: ``ICC1`` consumption (average kW per 15 min → divide by 4 for kWh),
   ``ICQ2`` consumption energy in kWh (since 2024-07-01), ``ISC1``/``ISQ2`` export to grid.
@@ -24,20 +24,38 @@ Summary of the documented interface:
   ``/rest/c/spotreby`` with OBIS-like profile codes and ``zdrojDat``. The 2026-05 revision
   lists A, B and C1 under the unified ``/rest/spotreby``. Both are supported here
   (``api_variant="rest"`` – default – or ``"c1-legacy"``).
+
+Behaviour observed against the live API (Nov 2026, measurement type B):
+
+* responses are a single JSON object ``{"ean/eic", "profile", "units": "kW"|"kWh",
+  "total", "data": [{"timestamp": "…Z", "value": 0.12, "status": "W"}]}``;
+* timestamps mark the interval **start**; ``from`` is inclusive and ``to`` exclusive;
+* ``to`` must lie before today's local midnight (HTTP 400 "…nejvýše ke včerejšímu dni");
+  ``from`` at most 3 years back; outside the customer's authorised period HTTP 400
+  "V požadovaném období nemáte oprávnění…" for the whole request;
+* a 31-day request returns all ~2980 values at once; ``pageStart=1`` (as documented) drops
+  the first value of the range, so paging parameters are not sent at all;
+* ``/rest/profily`` lists ``ICC1``/``ICQ2`` for types A/B and ``DCQC`` for C1.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 
 import requests
 
 from egd_spot.http import DEFAULT_TIMEOUT, FetchError
 from egd_spot.models import LoadResult, Reading
-from egd_spot.timeutil import QUARTER, format_api_utc, parse_iso_utc
+from egd_spot.timeutil import (
+    QUARTER,
+    format_api_utc,
+    local_date,
+    local_midnight_utc,
+    parse_iso_utc,
+)
 
 PROD_TOKEN_URL = "https://idm.distribuce24.cz/oauth/token"
 PROD_DATA_URL = "https://data.distribuce24.cz/rest"
@@ -45,11 +63,15 @@ TEST_TOKEN_URL = "https://test.distribuce24.cz/idm/oauth/token"
 TEST_DATA_URL = "https://test.distribuce24.cz/openApi"
 SCOPE = "namerena_data_openapi"
 
-DEFAULT_PROFILE = "ICC1"
+DEFAULT_PROFILE = "ICC1"  # measurement types A, B
+C1_PROFILE = "DCQC"  # measurement type C1 (smart meter): "Spotřeba energie odebrané ze sítě"
+MAX_PAGES = 10
+TRUNCATION_THRESHOLD = 2900  # a response this long may have hit the 3000-value cap
 C1_LEGACY_PROFILE = "0.0.2.4.1.2.12.0.0.0.0.0.0.0.0.3.72.0"  # "Spotřeba energie celkem (kWh)"
 POWER_PROFILES = frozenset({"ICC1", "ISC1", "IKC1", "IMC1"})  # mean kW / kVAr per 15 min
-VALID_STATUSES = frozenset({"IU012", "W"})
-PAGE_SIZE = 3000
+# final values per /rest/statusy: W valid; B, E, M, N substitute but final ("náhradní platná");
+# G, V are temporary substitutes, F missing. IU012 = valid in the older A/B code list.
+VALID_STATUSES = frozenset({"W", "B", "E", "M", "N", "IU012"})
 CHUNK = timedelta(days=30)  # 30 × 96 (+4 on DST) < 3000 records
 
 ApiVariant = Literal["rest", "c1-legacy"]
@@ -58,6 +80,42 @@ TimestampConvention = Literal["start", "end"]
 
 class EgdAuthError(FetchError):
     pass
+
+
+class EgdRequestError(FetchError):
+    """Non-200 answer from the data API; EG.D returns ``{"error", "message"}`` (Czech)."""
+
+    def __init__(self, message: str, api_message: str = "", status: int = 0) -> None:
+        super().__init__(message)
+        self.api_message = api_message
+        self.status = status
+
+    @property
+    def no_access(self) -> bool:
+        # "V požadovaném období nemáte oprávnění na data odběrného místa."
+        return "oprávnění" in self.api_message
+
+    @classmethod
+    def from_response(cls, path: str, resp: requests.Response) -> EgdRequestError:
+        api_message = ""
+        try:
+            body = resp.json()
+            if isinstance(body, dict):
+                api_message = str(body.get("message") or body.get("error") or "")
+        except ValueError:
+            api_message = resp.text[:300]
+        hint = ""
+        if "včerejšímu" in api_message:
+            hint = " (data are available only up to yesterday)"
+        elif "3 roky" in api_message:
+            hint = " (data are available for at most the last 3 years)"
+        elif "oprávnění" in api_message:
+            hint = " (your account has no access to this metering point for that period)"
+        return cls(
+            f"EG.D {path} returned HTTP {resp.status_code}: {api_message}{hint}",
+            api_message,
+            resp.status_code,
+        )
 
 
 @dataclass(slots=True)
@@ -126,7 +184,7 @@ class EgdClient:
                 self._token = None  # token expired at midnight – get a fresh one
                 continue
             if resp.status_code != 200:
-                raise FetchError(f"EG.D {path} returned HTTP {resp.status_code}: {resp.text[:300]}")
+                raise EgdRequestError.from_response(path, resp)
             try:
                 return resp.json()
             except ValueError as exc:
@@ -141,6 +199,25 @@ class EgdClient:
     def profiles(self, variant: ApiVariant = "rest") -> list[dict[str, Any]]:
         return self._get("c/profily" if variant == "c1-legacy" else "profily")
 
+    def default_profile(self, ean: str) -> str:
+        """Consumption profile matching the metering point's measurement type.
+
+        ``/rest/profily`` lists ``ICC1``/``ICQ2`` for types A and B and ``DCQC`` for C1
+        (smart meters); requesting the wrong one returns an empty data set.
+        """
+        try:
+            points = self.metering_points()
+        except FetchError:
+            return DEFAULT_PROFILE
+        for p in points:
+            if str(p.get("ean")) == str(ean):
+                return (
+                    C1_PROFILE
+                    if str(p.get("typMereni", "")).upper().startswith("C")
+                    else (DEFAULT_PROFILE)
+                )
+        return DEFAULT_PROFILE
+
     def readings(
         self,
         ean: str,
@@ -151,68 +228,164 @@ class EgdClient:
         variant: ApiVariant = "rest",
         data_source: str = "ODBERNE_MISTO",
         timestamps: TimestampConvention | None = None,
+        today: date | None = None,
     ) -> LoadResult:
-        """Download readings for the UTC half-open range [start, end)."""
+        """Download readings for the UTC half-open range [start, end).
+
+        * EG.D serves data only up to yesterday (local time); later parts are dropped.
+        * If the account has no access to the beginning of the range (data are available only
+          since the customer's contract/authorisation began), the first accessible day is
+          located and the earlier part is skipped with a warning.
+        """
+        warnings: list[str] = []
+        limit = local_midnight_utc(today or date.today())
+        if end > limit:
+            end = limit
+            warnings.append(
+                "EG.D provides data only up to yesterday; the period was truncated to "
+                f"{local_date(limit - QUARTER)}."
+            )
         if variant == "c1-legacy":
             profile = profile or C1_LEGACY_PROFILE
             ts_conv: TimestampConvention = timestamps or "end"
         else:
-            profile = profile or DEFAULT_PROFILE
+            profile = profile or self.default_profile(ean)
             ts_conv = timestamps or "start"
 
         readings: dict[datetime, Reading] = {}
         bad_status: dict[str, int] = {}
+        first_access: datetime | None = None
         for chunk_start, chunk_end in _chunks(start, end):
-            # API wants an inclusive range of interval timestamps
-            if ts_conv == "start":
-                q_from, q_to = chunk_start, chunk_end - QUARTER
-            else:
-                q_from, q_to = chunk_start + QUARTER, chunk_end
-            for raw in self._paged(ean, profile, q_from, q_to, variant, data_source):
+            try:
+                pages = list(
+                    self._fetch_chunk(
+                        ean, profile, chunk_start, chunk_end, variant, data_source, ts_conv
+                    )
+                )
+            except EgdRequestError as exc:
+                if not exc.no_access or readings:
+                    raise
+                found = self._first_accessible(ean, profile, chunk_start, chunk_end)
+                if found is None:
+                    continue  # nothing accessible in this chunk – try the next one
+                first_access = found
+                pages = list(
+                    self._fetch_chunk(ean, profile, found, chunk_end, variant, data_source, ts_conv)
+                )
+            for raw in pages:
                 for r in parse_readings(raw, ts_conv):
                     if start <= r.start < end:
                         readings[r.start] = r
                         if r.status and r.status not in VALID_STATUSES:
                             bad_status[r.status] = bad_status.get(r.status, 0) + 1
-        warnings = []
+        if first_access is not None:
+            warnings.append(
+                f"Your EG.D access covers this metering point only since "
+                f"{local_date(first_access)}; earlier data were skipped."
+            )
+        elif not readings and start < end:
+            warnings.append(
+                f"EG.D returned no data for this period (profile {profile}; no access yet, "
+                "or try another --profile)."
+            )
         if bad_status:
             detail = ", ".join(f"{k}×{v}" for k, v in sorted(bad_status.items()))
             warnings.append(
                 f"Some EG.D values are not final/valid (status {detail}); they were included. "
                 "EG.D recommends re-downloading such data later."
             )
-        return LoadResult(sorted(readings.values(), key=lambda r: r.start), warnings)
+        return LoadResult(sorted(readings.values(), key=lambda r: r.start), warnings, first_access)
 
-    def _paged(
+    def _first_accessible(
+        self, ean: str, profile: str, chunk_start: datetime, chunk_end: datetime
+    ) -> datetime | None:
+        """Binary search for the first local midnight from which [midnight, chunk_end) is
+        accessible. Returns None when nothing in the chunk is accessible."""
+        days = []
+        d = local_date(chunk_start)
+        while local_midnight_utc(d) < chunk_end:
+            m = local_midnight_utc(d)
+            days.append(max(m, chunk_start))
+            d += timedelta(days=1)
+
+        def ok(t: datetime) -> bool:
+            try:
+                self._get(
+                    "spotreby",
+                    {
+                        "ean": ean,
+                        "profile": profile,
+                        "from": format_api_utc(t),
+                        "to": _format_to(min(t + QUARTER * 4, chunk_end)),
+                    },
+                )
+            except EgdRequestError as exc:
+                if exc.no_access:
+                    return False
+                raise
+            return True
+
+        lo, hi = 0, len(days)  # invariant: days[hi:] accessible, days[:lo] not
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if ok(days[mid]):
+                hi = mid
+            else:
+                lo = mid + 1
+        return days[lo] if lo < len(days) else None
+
+    def _fetch_chunk(
         self,
         ean: str,
         profile: str,
-        q_from: datetime,
-        q_to: datetime,
+        chunk_start: datetime,
+        chunk_end: datetime,
         variant: ApiVariant,
         data_source: str,
+        ts_conv: TimestampConvention,
     ) -> Iterator[Any]:
-        params: dict[str, Any] = {
-            "ean": ean,
-            "profile": profile,
-            "from": format_api_utc(q_from),
-            "to": format_api_utc(q_to),
-        }
         if variant == "c1-legacy":
-            params["zdrojDat"] = data_source
+            # legacy endpoint: inclusive range of interval-end timestamps
+            q_from, q_to = (
+                (chunk_start + QUARTER, chunk_end)
+                if ts_conv == "end"
+                else (chunk_start, chunk_end - QUARTER)
+            )
+            params = {
+                "ean": ean,
+                "profile": profile,
+                "from": format_api_utc(q_from),
+                "to": format_api_utc(q_to),
+                "zdrojDat": data_source,
+            }
             yield self._get("c/spotreby", params)
             return
-        page_start = 1
-        seen_first: set[str] = set()
-        while True:
-            page = self._get("spotreby", {**params, "pageStart": page_start, "pageSize": PAGE_SIZE})
+        # Observed behaviour of /rest/spotreby: "to" is exclusive, timestamps mark interval
+        # starts, and "to" may not reach today's local midnight – so ask for ...:59.999Z.
+        # pageStart/pageSize are NOT used: with pageStart=1 the live API silently drops the
+        # first value (the guide's own example uses PageStart=0). A 30-day chunk (≤ 2884
+        # values) fits into one response; should a response ever be truncated, continue
+        # from the last timestamp received.
+        q_from = chunk_start
+        for _ in range(MAX_PAGES):
+            page = self._get(
+                "spotreby",
+                {
+                    "ean": ean,
+                    "profile": profile,
+                    "from": format_api_utc(q_from),
+                    "to": _format_to(chunk_end),
+                },
+            )
             yield page
             n = _count_records(page)
-            first = _first_timestamp(page)
-            if n < PAGE_SIZE or first is None or first in seen_first:
+            last = _last_timestamp(page)
+            if n < TRUNCATION_THRESHOLD or last is None:
                 return
-            seen_first.add(first)
-            page_start += PAGE_SIZE
+            nxt = parse_iso_utc(last) + QUARTER
+            if nxt >= chunk_end or nxt <= q_from:
+                return
+            q_from = nxt
 
 
 def _chunks(start: datetime, end: datetime) -> Iterator[tuple[datetime, datetime]]:
@@ -235,11 +408,17 @@ def _count_records(payload: Any) -> int:
     return sum(len(b.get("data") or []) for b in _blocks(payload))
 
 
-def _first_timestamp(payload: Any) -> str | None:
+def _last_timestamp(payload: Any) -> str | None:
+    last = None
     for b in _blocks(payload):
         for rec in b.get("data") or []:
-            return str(rec.get("timestamp"))
-    return None
+            last = str(rec.get("timestamp"))
+    return last
+
+
+def _format_to(end_exclusive: datetime) -> str:
+    """Exclusive range end as EG.D accepts it (one millisecond before ``end_exclusive``)."""
+    return (end_exclusive - timedelta(minutes=1)).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:59.999Z")
 
 
 def _to_float(v: Any) -> float | None:

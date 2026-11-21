@@ -210,7 +210,7 @@ effective price = total / Σ E_i                      [CZK/kWh]
 
 | Data | Source | Notes |
 |---|---|---|
-| Consumption | EG.D OpenAPI – `POST https://idm.distribuce24.cz/oauth/token` (client credentials, scope `namerena_data_openapi`), `GET https://data.distribuce24.cz/rest/spotreby?ean=…&profile=ICC1&from=…&to=…` | Profile `ICC1` = mean 15-min power in kW (÷4 → kWh); `ICQ2` = kWh. Max 3000 values per call → requested in 30-day chunks. [User guide (PDF)](https://www.egd.cz/sites/default/files/2026-05/uzivatelsky_navod_openapi_abc.pdf), [older version](https://portal.distribuce24.cz/download/Uzivatelsky_navod_OpenApi.pdf) |
+| Consumption | EG.D OpenAPI – `POST https://idm.distribuce24.cz/oauth/token` (client credentials, scope `namerena_data_openapi`), `GET https://data.distribuce24.cz/rest/spotreby?ean=…&profile=ICC1&from=…&to=…` | Profile `ICC1` = mean 15-min power in kW (÷4 → kWh); `ICQ2` = kWh; `DCQC` = C1 smart meters. Max 3000 values per call → requested in 30-day chunks (`to` is exclusive; paging parameters are avoided because `pageStart=1` drops a value). [User guide (PDF)](https://www.egd.cz/sites/default/files/2026-05/uzivatelsky_navod_openapi_abc.pdf), [older version](https://portal.distribuce24.cz/download/Uzivatelsky_navod_OpenApi.pdf) |
 | Spot prices | OTE-CR public SOAP service `https://www.ote-cr.cz/pw-data/services/PublicDataService` – `GetDamPriceE` (hourly, CZK) and `GetDamPricePeriodE` (15-min, EUR) | One calendar month per request. [Manual](https://www.ote-cr.cz/cs/dokumentace/xsd-wsdl-manual-pubweb) |
 | EUR/CZK | ČNB daily fixing, [`year.txt`](https://www.cnb.cz/en/financial-markets/foreign-exchange-market/central-bank-exchange-rate-fixing/central-bank-exchange-rate-fixing/year.txt?year=2025) | Rate of the delivery day (last fixing before it on weekends/holidays) – this reproduces OTE's own CZK prices from before Oct 2025. Your supplier may use a different rate. |
 
@@ -223,9 +223,17 @@ All timestamps are handled in UTC internally and reported in Europe/Prague time;
   described in the 2025-12 revision of the EG.D guide (OBIS-style profile codes,
   `zdrojDat`). The current (2026-05) guide lists A, B and C1 under the unified
   `/rest/spotreby`, which is the default.
-* `--api-timestamps start|end`: the guide states that query times range from 00:00 to 23:45,
-  i.e. timestamps label the **start** of each interval; that is the default. If your totals
-  look shifted by 15 minutes, try `end`.
+* Timestamps label the **start** of each interval (confirmed against the live API: the last
+  value of a day is 23:45 local, and a request reaching local midnight of today is rejected).
+  `--api-timestamps end` exists only for the legacy endpoint.
+* The consumption profile is chosen from the metering point's measurement type
+  (`/rest/om`): `ICC1` for A/B, `DCQC` for C1 smart meters. Override with `--profile`
+  (e.g. `ICQ2`, which gives identical kWh to `ICC1`).
+* EG.D only serves data up to **yesterday**, at most **3 years** back, and only for the period
+  your account is authorised for. The tool trims the period accordingly and tells you from
+  which date data are available.
+* Values with substitute statuses that EG.D marks as final (`B`, `E`, `M`, `N`) are used
+  silently; temporary ones (`G`, `V`) produce a warning.
 * `--test-env` talks to EG.D's test environment (`test.distribuce24.cz`), for which you can
   generate test credentials in the portal.
 
@@ -249,9 +257,9 @@ of DST are resolved by row order.
 
 ## Limitations
 
-* The EG.D API could not be tested against live data by the author of this version
-  (it needs your own credentials); the implementation follows EG.D's published guide and is
-  covered by tests with mocked responses. Feedback from real users is welcome.
+* The EG.D API was verified live with a measurement type **B** metering point (Nov 2026).
+  Type C1 (`DCQC` profile) follows the official profile list but has not been tried on a
+  real C1 meter yet.
 * The layout of the portal's XLSX export is not documented; auto-detection is heuristic.
   Use the column options if it picks the wrong column.
 * Suppliers' exact formulas vary (exchange rate, rounding, treatment of negative prices,

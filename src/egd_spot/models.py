@@ -39,3 +39,4 @@ class PricePoint:
 class LoadResult:
     readings: list[Reading]
     warnings: list[str] = field(default_factory=list)
+    available_from: datetime | None = None  # set when the source has no data before this

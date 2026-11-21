@@ -196,8 +196,16 @@ def cmd_calc(args: argparse.Namespace) -> int:
         info(f"Loaded {len(data.readings)} readings from {args.input}", args.json)
     else:
         start, end = resolve_period(args)
+        yesterday = date.today() - timedelta(days=1)
+        if end > yesterday:
+            end = yesterday
+            warn(f"EG.D provides data only up to yesterday; using --to {end}.")
+        if end < start:
+            raise CliError("No EG.D data can exist for this period yet.")
         info(f"Downloading EG.D data {start} – {end} ...", args.json)
         data = ctx.egd_readings(start, end)
+        if data.available_from is not None:
+            start = max(start, local_date(data.available_from))
     for w in data.warnings:
         warn(w)
     if end >= date.today():

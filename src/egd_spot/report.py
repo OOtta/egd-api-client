@@ -97,8 +97,9 @@ def render_breakdown(res: Result, out: TextIO) -> None:
             "  ".join(v.ljust(widths[0]) if i == 0 else v.rjust(widths[i]) for i, v in enumerate(r))
             + "\n"
         )
+    incl = "Total, Fixed and Saved" if fixed else "Total"
     vat_note = (
-        "Energy and Fee excl. VAT; Total, Fixed and Saved incl. VAT"
+        f"Energy and Fee excl. VAT; {incl} incl. VAT"
         if res.tariff.vat_percent
         else "all amounts excl. VAT"
     )
