@@ -51,7 +51,8 @@ First version, published as **egd-api-client** (command `egd`).
   fixed tariff is given: consumption-weighted and simple (time) average in CZK/MWh,
   excl. VAT and fees; `Fixed avg` column in
   the breakdown, `avg_fixed_czk_mwh` / `avg_fixed_time_weighted_czk_mwh` in CSV/JSON.
-- Documentation in Czech (`README.md`).
+- Documentation in Czech (`README.md`), incl. a section on negative-price handling
+  (`--negative as-is|clamp-spot|clamp-total`, negative-only coefficients) with examples.
 - Windows: console output with Czech characters (e.g. `ČNB`) no longer fails on a
   redirected/piped cp1252 stdout – such streams are switched to UTF-8.
 - `tzdata` is now an unconditional dependency, so `egd` works where the OS has no

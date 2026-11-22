@@ -29,6 +29,7 @@ Stejné funkce jsou k dispozici jako knihovna (`egd_api_client.EgdClient`,
 - [Příkazy](#příkazy)
 - [Použití jako knihovny](#použití-jako-knihovny)
 - [Jak se počítá cena](#jak-se-počítá-cena)
+  - [Záporné ceny (`--negative`)](#záporné-ceny---negative)
 - [Přepočet EUR/CZK](#přepočet-eurczk)
 - [Nízký tarif (NT)](#nízký-tarif-nt)
 - [Distribuční poplatky](#distribuční-poplatky)
@@ -258,7 +259,7 @@ Nejdůležitější volby `egd spot calc`:
 | `--vat [PROCENTA]` | připočíst DPH; samotné `--vat` znamená 21 % |
 | `--negative-multiplier X` | násobek pro období se záporným spotem (výchozí: `-m`) |
 | `--negative-add-czk-mwh X` | přirážka pro období se záporným spotem (výchozí: `-a`) |
-| `--negative REŽIM` | zacházení se zápornými cenami: `as-is` (výchozí), `clamp-spot`, `clamp-total` – viz níže |
+| `--negative REŽIM` | zacházení se zápornými cenami: `as-is` (výchozí), `clamp-spot`, `clamp-total` – viz [Záporné ceny](#záporné-ceny---negative) |
 | `--price-resolution` | `auto` (čtvrthodinové ceny, kde existují) nebo `hourly` |
 | `--fixed-price KČ_KWH` | porovnání s fixní cenou za kWh (bez DPH); u dvoutarifního produktu cena VT |
 | `--fixed-price-low KČ_KWH` | cena NT fixního produktu; vyžaduje `--low-tariff-hours` |
@@ -353,19 +354,8 @@ efektivní cena = celkem / Σ E_i                       [Kč/kWh]
   čtvrthodinová hodnota spotřeby dostane cenu své hodiny. Od 1. 10. 2025 se používá
   čtvrthodinová cena (nebo hodinová s `--price-resolution hourly`). Hodinová data spotřeby
   se rovnoměrně rozdělí na čtvrthodiny.
-* **Záporné ceny.** Někteří dodavatelé při záporném spotu používají jiné koeficienty:
-  `--negative-multiplier` / `--negative-add-czk-mwh` (v konfiguraci `[spot]`
-  `negative_multiplier` / `negative_add_czk_mwh`). Co není zadáno, převezme se z běžného
-  `-m` / `-a`. Která dvojice platí, rozhoduje znaménko původní ceny OTE (ostře pod 0),
-  ještě *před* jakýmkoli ořezáním. Potom `--negative` určí:
-  * `as-is` (výchozí) – `S × záp_násobek + záp_přirážka`; záporná cena snižuje účet
-    (násobek > 1 dobropis zvětšuje);
-  * `clamp-spot` – záporný spot se *před* použitím koeficientů nahradí nulou, cena je tedy
-    `záp_přirážka` (přirážku za období se zápornou cenou platíte i tak);
-  * `clamp-total` – `S × záp_násobek + záp_přirážka`, ořezáno zdola na 0 (za spotřebu
-    nikdy nedostanete zaplaceno).
-
-  Ověřte si podmínky svého dodavatele – liší se.
+* **Záporné ceny** – jiné koeficienty a režim `--negative`, viz
+  [Záporné ceny](#záporné-ceny---negative) níže.
 * **Porovnání s fixní cenou VT/NT.** S `--fixed-price-low` se každý čtvrthodinový interval
   ocení cenou NT za tu část, která spadá do okna nízkého tarifu, a cenou VT
   (`--fixed-price`) za zbytek; spotřeba v NT se zobrazí ve výpisu (`NT kWh`).
@@ -390,6 +380,41 @@ efektivní cena = celkem / Σ E_i                       [Kč/kWh]
   `avg_fixed_time_weighted_czk_mwh`.
 * Období bez dat spotřeby nebo bez tržní ceny se vynechají a nahlásí jako varování (např.
   stav nouze 4. 7. 2025, kdy OTE 12 hodin nezveřejnil ceny).
+
+### Záporné ceny (`--negative`)
+
+Když je spotová cena OTE záporná, smlouvy dodavatelů se liší: někdo zápornou cenu přeposílá
+zákazníkovi, někdo ji ořezává na nulu, někdo k ní účtuje jiné koeficienty. Kalkulačka proto
+umí obojí nastavit zvlášť:
+
+1. **Které koeficienty platí.** Pro interval se záporným spotem (ostře pod 0) se použije
+   `--negative-multiplier` / `--negative-add-czk-mwh` (v konfiguraci `[spot]`
+   `negative_multiplier` / `negative_add_czk_mwh`); co není zadáno, převezme se z běžného
+   `-m` / `-a`. O výběru rozhoduje znaménko **původní** ceny OTE – ještě před jakýmkoli
+   ořezáním.
+2. **Jak se se zápornou cenou naloží** (`--negative`, v konfiguraci `[spot] negative`):
+   * `as-is` (výchozí) – záporný spot se použije tak, jak je. Po vynásobení a přičtení
+     přirážky může vyjít záporná cena, tj. **za odběr dostanete zaplaceno** (dobropis snižuje
+     účet; násobek > 1 dobropis zvětšuje).
+   * `clamp-spot` – záporný spot se **nejdřív nahradí nulou** a teprve pak se použijí
+     koeficienty, takže zaplatíte jen přirážku (např. spot −500 a přirážka +400 →
+     400 Kč/MWh).
+   * `clamp-total` – cena se spočítá s koeficienty a **výsledek se ořízne zdola na 0**: za odběr
+     nikdy nedostanete zaplaceno, ale levnější než přirážka to být může (−500 + 400 = −100 →
+     0; −200 + 400 = 200).
+
+Příklady cen energie v Kč/MWh bez DPH:
+
+| Spot OTE | Koeficienty | `as-is` | `clamp-spot` | `clamp-total` |
+|---:|---|---:|---:|---:|
+| 1 000 | × 1, + 400 | 1 400 | 1 400 | 1 400 |
+| −200 | × 1, + 400 | 200 | 400 | 200 |
+| −500 | × 1, + 400 | −100 | 400 | 0 |
+| −500 | × 1,15, + 400 | −175 | 400 | 0 |
+| −500 | × 1,15, + 400; při záporném spotu × 1, + 0 | −500 | 0 | 0 |
+
+Kladné ceny režim nijak neovlivní. Jak to dělá váš dodavatel, najdete ve smlouvě nebo
+v ceníku (obvykle u definice ceny za „hodiny se zápornou cenou“).
 
 ## Přepočet EUR/CZK
 
