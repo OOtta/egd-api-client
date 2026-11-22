@@ -57,6 +57,22 @@ First version, published as **egd-api-client** (command `egd`).
 - `tzdata` is now an unconditional dependency, so `egd` works where the OS has no
   time-zone database (Termux/Android, minimal containers), with a clear hint if the zone
   still cannot be loaded; Python 3.14 added to CI and classifiers.
+- Persistent cache of OTE prices and ČNB rates per delivery day, so repeated runs download
+  nothing: only days missing from the cache are fetched (in one-month requests, never mixing
+  the hourly and 15-minute regimes). Only complete past days are stored – the exact period
+  count for that day incl. DST (23/24/25 hours, 92/96/100 quarter-hours); today, future and
+  incomplete days are never cached. Raw OTE values are stored with their currency and
+  resolution (`PT60M`/CZK before 2025-10, `PT15M`/EUR after), CZK conversion happens on every
+  run. Versioned files (`ote/YYYY-MM.json`, `cnb/YYYY.json`, `"format": 2`; older files are
+  migrated), atomic writes, a corrupted file is re-downloaded with a warning (in `warnings`
+  with `--json`). ČNB years fetched after the year ended are never re-downloaded; the current
+  year is refreshed at most once per day and only when a newer fixing is needed. Cache dir:
+  `$EGD_CACHE_DIR`, `%LOCALAPPDATA%\egd-api-client` on Windows, else
+  `$XDG_CACHE_HOME/egd-api-client` (`~/.cache/egd-api-client`, also on Termux).
+- `--refresh-cache` (download again and update the cache) next to `--no-cache`; new
+  `egd cache info` / `egd cache clear [--ote] [--cnb]` (both with `--json`). `egd spot
+  calc|prices|fx` print how many days came from the cache vs. were downloaded (suppressed
+  with `--json`; the JSON output has a `cache` object with the counts).
 - CSV/XLSX consumption import with column, unit, timestamp-convention and DST detection.
 - Config file `~/.config/egd-api-client/config.toml` with `[egd]`, `[spot]`, `[spot.fixed]`
   sections; environment variables `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`,

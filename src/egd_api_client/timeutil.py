@@ -57,6 +57,11 @@ def local_date(dt: datetime) -> date:
     return dt.astimezone(PRAGUE).date()
 
 
+def local_today() -> date:
+    """Today's date in Prague (the market's delivery-day calendar)."""
+    return datetime.now(UTC).astimezone(PRAGUE).date()
+
+
 def iter_days(start: date, end_inclusive: date) -> Iterator[date]:
     d = start
     while d <= end_inclusive:

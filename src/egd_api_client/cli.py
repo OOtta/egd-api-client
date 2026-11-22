@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from egd_api_client import __version__
+from egd_api_client.cache import JsonCache, default_cache_dir
 from egd_api_client.cli_common import (
     CliError,
     Context,
@@ -44,6 +45,7 @@ examples:
   egd spot calc --input october.csv --add-czk-mwh 350 --fixed-price 3.2
   egd spot prices --from 2026-11 -o prices.csv
   egd spot fx --from 2026-10-24 --to 2026-11-02 -o fx.csv
+  egd cache info
 
 EG.D credentials: env EGD_CLIENT_ID / EGD_CLIENT_SECRET or the [egd] section of the
 config file (default ~/.config/egd-api-client/config.toml).
@@ -108,6 +110,53 @@ def cmd_data(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cache(args: argparse.Namespace) -> JsonCache:
+    return JsonCache(Path(args.cache_dir).expanduser() if args.cache_dir else default_cache_dir())
+
+
+def _fmt_bytes(n: int) -> str:
+    return f"{n / 1024:.1f} KiB" if n >= 1024 else f"{n} B"
+
+
+def cmd_cache_info(args: argparse.Namespace) -> int:
+    cache = _cache(args)
+    data = cache.info()
+    assert cache.directory is not None
+    ote = sorted(p.stem for p in (cache.directory / "ote").glob("*.json"))
+    cnb = sorted(p.stem for p in (cache.directory / "cnb").glob("*.json"))
+    days = 0
+    for mk in ote:
+        doc = cache.get("ote", mk)
+        if isinstance(doc, dict):
+            inner = doc.get("days") if doc.get("format") else doc
+            days += len(inner) if isinstance(inner, dict) else 0
+    data |= {"ote_months": ote, "ote_days": days, "cnb_years": cnb}
+    if args.json:
+        print_json(data)
+        return 0
+    print(f"cache directory: {data['directory']}")
+    if not data["namespaces"]:
+        print("(empty)")
+    for ns, st in data["namespaces"].items():
+        print(f"  {ns:<4} {st['files']:>3} file(s)  {_fmt_bytes(st['bytes']):>10}")
+    if ote:
+        print(f"OTE prices: {days} delivery day(s) in {ote[0]} … {ote[-1]}")
+    if cnb:
+        print(f"ČNB rates: {', '.join(cnb)}")
+    return 0
+
+
+def cmd_cache_clear(args: argparse.Namespace) -> int:
+    cache = _cache(args)
+    only = tuple(ns for ns in ("ote", "cnb") if getattr(args, ns))
+    removed = cache.clear(only or None)
+    if args.json:
+        print_json({"directory": str(cache.directory), "removed": removed})
+    else:
+        print(f"removed from {cache.directory}: {', '.join(removed) or 'nothing'}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     common, period, egd = common_parser(), period_parser(), egd_parser()
     parser = argparse.ArgumentParser(
@@ -147,6 +196,28 @@ def build_parser() -> argparse.ArgumentParser:
     da.set_defaults(func=cmd_data)
 
     spot_cli.register(sub, common=common, period=period, egd=egd)
+
+    cache_common = argparse.ArgumentParser(add_help=False)
+    g = cache_common.add_argument_group("general")
+    g.add_argument(
+        "--cache-dir", metavar="DIR", help="cache directory (default ~/.cache/egd-api-client)"
+    )
+    g.add_argument("--json", action="store_true", help="print machine-readable JSON to stdout")
+    ca = sub.add_parser(
+        "cache",
+        help="show or clear the local cache of OTE prices and ČNB rates",
+        description="Cached data: complete past delivery days of OTE prices (ote/YYYY-MM.json) "
+        "and ČNB EUR/CZK fixings (cnb/YYYY.json). Directory: $EGD_CACHE_DIR, else "
+        "%LOCALAPPDATA%\\egd-api-client on Windows, else $XDG_CACHE_HOME/egd-api-client "
+        "(~/.cache/egd-api-client).",
+    )
+    csub = ca.add_subparsers(dest="cache_command", required=True, metavar="ACTION")
+    ci = csub.add_parser("info", parents=[cache_common], help="show cache location and contents")
+    ci.set_defaults(func=cmd_cache_info)
+    cc = csub.add_parser("clear", parents=[cache_common], help="delete cached data")
+    cc.add_argument("--ote", action="store_true", help="only OTE prices")
+    cc.add_argument("--cnb", action="store_true", help="only ČNB rates")
+    cc.set_defaults(func=cmd_cache_clear)
     return parser
 
 

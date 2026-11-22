@@ -45,6 +45,30 @@ class SpotContext(Context):
         self.cnb = CnbRates(self.session, self.cache)
         self.ote = OteClient(self.session, self.cache, self.cnb)
 
+    def cache_stats(self) -> dict[str, Any]:
+        return {
+            "enabled": self.cache.enabled,
+            "refresh": self.cache.refresh,
+            "ote": self.ote.stats.as_dict(),
+            "cnb": self.cnb.stats.as_dict(),
+        }
+
+    def report_cache(self) -> None:
+        """Progress line: delivery days from the cache vs. downloaded (suppressed with --json)."""
+        o, c = self.ote.stats, self.cnb.stats
+        if not self.cache.enabled:
+            how = "cache disabled"
+        elif self.cache.refresh:
+            how = "cache refreshed"
+        else:
+            how = f"{o.cached_days} day(s) from cache"
+        line = f"OTE prices: {how}, {o.downloaded_days} day(s) downloaded ({o.requests} request(s))"
+        if c.cached_years or c.downloaded_years:
+            line += (
+                f"; ČNB rates: {c.cached_years} year(s) from cache, {c.downloaded_years} downloaded"
+            )
+        info(line)
+
     def warn_unpriced(self) -> None:
         for d, n in sorted(self.ote.unpriced.items()):
             warn(
@@ -154,8 +178,9 @@ def cmd_calc(args: argparse.Namespace) -> int:
         warn("The period includes today or future days; data and prices may be incomplete.")
 
     resolution = args.price_resolution or ctx.cfg.spot.get("price_resolution", "auto")
-    info(f"Downloading OTE spot prices {start} – {end} ...", args.json)
+    info(f"OTE spot prices {start} – {end} ...", args.json)
     prices = ctx.ote.prices(start, end, resolution)
+    ctx.report_cache()
     if not prices:
         raise CliError("No spot prices available for the selected period.")
     ctx.warn_unpriced()
@@ -181,7 +206,7 @@ def cmd_calc(args: argparse.Namespace) -> int:
         export_result(res, Path(args.export), warnings=collected_warnings())
         info(f"Wrote {args.export}", args.json)
     if args.json:
-        print_json({"source": source} | res.as_dict())
+        print_json({"source": source} | res.as_dict() | {"cache": ctx.cache_stats()})
     else:
         render_summary(res, sys.stdout)
         render_breakdown(res, sys.stdout)
@@ -196,6 +221,7 @@ def cmd_prices(args: argparse.Namespace) -> int:
     start, end = resolve_period(args)
     eur = args.currency == "eur"
     points = ctx.ote.prices(start, end, args.price_resolution or "auto", with_eur=eur)
+    ctx.report_cache()
     if not points:
         raise CliError("No spot prices available for the selected period.")
     ctx.warn_unpriced()
@@ -222,7 +248,7 @@ def cmd_prices(args: argparse.Namespace) -> int:
         )
         info(f"Wrote {args.export}", args.json)
     if args.json:
-        print_json(summary)
+        print_json(summary | {"cache": ctx.cache_stats()})
     else:
         print(f"Spot prices {start} – {end}: {len(points)} periods ({unit})")
         print(f"  average {fmt(summary['avg'])} {unit}")
@@ -262,6 +288,7 @@ def cmd_fx(args: argparse.Namespace) -> int:
     ctx = SpotContext(args)
     start, end = resolve_period(args)
     rows = fx_rows(ctx.cnb, start, end)
+    ctx.report_cache()
     rates = [r["eur_czk"] for r in rows if r["eur_czk"] is not None]
     summary: dict[str, Any] = {
         "from": start.isoformat(),
@@ -277,7 +304,7 @@ def cmd_fx(args: argparse.Namespace) -> int:
         export_fx(rows, Path(args.export), warnings=collected_warnings())
         info(f"Wrote {args.export}", args.json)
     if args.json:
-        print_json(summary | {"days_detail": rows})
+        print_json(summary | {"days_detail": rows, "cache": ctx.cache_stats()})
     else:
         print("delivery day     EUR/CZK  ČNB fixing of")
         for r in rows:

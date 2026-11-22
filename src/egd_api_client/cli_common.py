@@ -173,6 +173,11 @@ def common_parser() -> argparse.ArgumentParser:
         "--cache-dir", metavar="DIR", help="cache directory (default ~/.cache/egd-api-client)"
     )
     g.add_argument("--no-cache", action="store_true", help="do not read or write the cache")
+    g.add_argument(
+        "--refresh-cache",
+        action="store_true",
+        help="ignore cached OTE prices / ČNB rates, download them again and update the cache",
+    )
     g.add_argument("--json", action="store_true", help="print machine-readable JSON to stdout")
     return p
 
@@ -267,7 +272,9 @@ class Context:
             cache_dir = None
         else:
             cache_dir = Path(args.cache_dir) if args.cache_dir else default_cache_dir()
-        self.cache = JsonCache(cache_dir)
+        self.cache = JsonCache(
+            cache_dir, warn=warn, refresh=bool(getattr(args, "refresh_cache", False))
+        )
 
     def egd(self) -> EgdClient:
         cid, secret = self.cfg.client_id, self.cfg.client_secret

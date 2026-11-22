@@ -25,6 +25,7 @@ Stejné funkce jsou k dispozici jako knihovna (`egd_api_client.EgdClient`,
 - [Rychlý start](#rychlý-start)
 - [Získání přístupu k API EG.D](#získání-přístupu-k-api-egd)
 - [Konfigurace](#konfigurace)
+  - [Mezipaměť (cache) cen OTE a kurzů ČNB](#mezipaměť-cache-cen-ote-a-kurzů-čnb)
 - [Příkazy](#příkazy)
 - [Použití jako knihovny](#použití-jako-knihovny)
 - [Jak se počítá cena](#jak-se-počítá-cena)
@@ -144,9 +145,36 @@ a `[distribution]` (distribuční poplatky); viz
 tajný klíč, nastavte mu `chmod 600` – jinak vás nástroj upozorní. Tajné údaje se nikdy
 nevypisují ani neukládají do mezipaměti; denní přístupový token je jen v paměti.
 
-Stažené ceny a kurzy se ukládají do `~/.cache/egd-api-client` (změna přes `--cache-dir` /
-`EGD_CACHE_DIR`, vypnutí `--no-cache`). Ukládají se jen kompletní dny. Naměřená data se
-neukládají nikdy.
+### Mezipaměť (cache) cen OTE a kurzů ČNB
+
+Spotové ceny OTE a kurzy ČNB se ukládají na disk, takže opakovaný výpočet za stejné období
+už nic nestahuje – stáhnou se jen dny, které v mezipaměti chybí. Průběh to hlásí řádkem
+(v režimu `--json` se nevypisuje, počty jsou v objektu `cache`):
+
+```text
+OTE prices: 143 day(s) from cache, 0 day(s) downloaded (0 request(s)); ČNB rates: 1 year(s) from cache, 0 downloaded
+```
+
+- **Umístění:** `$EGD_CACHE_DIR`, jinak na Windows `%LOCALAPPDATA%\egd-api-client`, jinak
+  `$XDG_CACHE_HOME/egd-api-client` (výchozí `~/.cache/egd-api-client`, i v Termuxu).
+  Jednorázově `--cache-dir ADRESÁŘ`.
+- **Co se ukládá:** jen *kompletní minulé* dny dodávky – přesný počet period daného dne
+  včetně přechodu na letní/zimní čas (23/24/25 hodin do 30. 9. 2025, 92/96/100 čtvrthodin od
+  1. 10. 2025). Dnešek, budoucí dny a neúplné dny se neukládají nikdy. Uložené dny se už
+  nemění, proto se znovu nestahují. Ukládají se původní hodnoty OTE i s měnou a rozlišením
+  (hodinové CZK / čtvrthodinové EUR); přepočet na CZK kurzem ČNB proběhne při každém spuštění.
+- **Kurzy ČNB:** jeden soubor na rok; uzavřený rok se už nestahuje, aktuální rok nejvýš
+  jednou denně a jen tehdy, když je potřeba novější fixing.
+- **Soubory:** `ote/RRRR-MM.json` a `cnb/RRRR.json` s verzí formátu (`"format": 2`;
+  starší soubory se automaticky převedou), zápis je atomický. Poškozený soubor se ohlásí
+  varováním (u `--json` v poli `warnings`) a data se stáhnou znovu.
+- **Volby:** `--no-cache` (nic nečíst ani neukládat), `--refresh-cache` (vše stáhnout znovu
+  a mezipaměť přepsat).
+- **Správa:** `egd cache info` (umístění, počet souborů, dnů a velikost) a
+  `egd cache clear` (smazat vše, `--ote` / `--cnb` jen jednu část); obojí umí `--json`.
+
+Naměřená data EG.D se neukládají nikdy (s `--input` je stačí stáhnout jednou přes
+`egd data`).
 
 ## Příkazy
 
@@ -158,10 +186,12 @@ neukládají nikdy.
 | `egd spot calc` | výpočet ceny vaší spotřeby se spotovým tarifem (z API nebo ze souboru) |
 | `egd spot prices --currency czk\|eur` | stažení / souhrn / export spotových cen OTE (`-o .csv/.json`); `--currency` je povinná |
 | `egd spot fx` | kurz ČNB EUR/CZK použitý pro každý den dodávky (`-o .csv/.json`, `--json`) |
+| `egd cache info` / `egd cache clear` | obsah mezipaměti cen OTE a kurzů ČNB / její smazání (`--ote`, `--cnb`) |
 
 Všechny volby vypíše `egd PŘÍKAZ --help` / `egd spot PŘÍKAZ --help`. Společné volby:
 `--from`, `--to` (místní data, včetně; `RRRR-MM-DD` nebo `RRRR-MM` = celý měsíc), `--ean`,
-`--profile`, `--json`, `--config`, `--cache-dir`, `--no-cache`, `--test-env`.
+`--profile`, `--json`, `--config`, `--cache-dir`, `--no-cache`, `--refresh-cache`,
+`--test-env`.
 
 ### Výstup JSON (`--json`)
 
