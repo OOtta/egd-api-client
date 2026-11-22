@@ -93,10 +93,12 @@ def cmd_data(args: argparse.Namespace) -> int:
         "values": len(data.readings),
         "total_kwh": round(total, 6),
     }
+    rc = ctx.readings_cache
+    cache = {"cache": {"enabled": ctx.cache.enabled, "egd": rc.stats.as_dict()}} if rc else {}
     out = Path(args.output) if args.output else None
     if out is None:
         if args.json:
-            print_json(summary | {"readings": readings_as_json(data.readings)})
+            print_json(summary | {"readings": readings_as_json(data.readings)} | cache)
         else:
             write_canonical_csv(data.readings, sys.stdout)  # type: ignore[arg-type]
         return 0
@@ -106,7 +108,7 @@ def cmd_data(args: argparse.Namespace) -> int:
         write_canonical_csv(data.readings, out)
     info(f"Wrote {out}")
     if args.json:
-        print_json(summary | {"output": str(out)})
+        print_json(summary | {"output": str(out)} | cache)
     return 0
 
 
@@ -130,7 +132,20 @@ def cmd_cache_info(args: argparse.Namespace) -> int:
         if isinstance(doc, dict):
             inner = doc.get("days") if doc.get("format") else doc
             days += len(inner) if isinstance(inner, dict) else 0
-    data |= {"ote_months": ote, "ote_days": days, "cnb_years": cnb}
+    egd_days = 0
+    egd_points = set()
+    for f in (cache.directory / "egd").glob("*_*_????-??.json"):
+        doc = cache.get("egd", f.stem)
+        if isinstance(doc, dict) and isinstance(doc.get("days"), dict):
+            egd_days += len(doc["days"])
+            egd_points.add(f.stem.split("_", 1)[0])
+    data |= {
+        "ote_months": ote,
+        "ote_days": days,
+        "cnb_years": cnb,
+        "egd_metering_points": len(egd_points),
+        "egd_days": egd_days,
+    }
     if args.json:
         print_json(data)
         return 0
@@ -143,12 +158,14 @@ def cmd_cache_info(args: argparse.Namespace) -> int:
         print(f"OTE prices: {days} delivery day(s) in {ote[0]} … {ote[-1]}")
     if cnb:
         print(f"ČNB rates: {', '.join(cnb)}")
+    if egd_days:
+        print(f"EG.D data: {egd_days} day(s) for {len(egd_points)} metering point(s)")
     return 0
 
 
 def cmd_cache_clear(args: argparse.Namespace) -> int:
     cache = _cache(args)
-    only = tuple(ns for ns in ("ote", "cnb") if getattr(args, ns))
+    only = tuple(ns for ns in ("ote", "cnb", "egd") if getattr(args, ns))
     removed = cache.clear(only or None)
     if args.json:
         print_json({"directory": str(cache.directory), "removed": removed})
@@ -205,9 +222,10 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--json", action="store_true", help="print machine-readable JSON to stdout")
     ca = sub.add_parser(
         "cache",
-        help="show or clear the local cache of OTE prices and ČNB rates",
-        description="Cached data: complete past delivery days of OTE prices (ote/YYYY-MM.json) "
-        "and ČNB EUR/CZK fixings (cnb/YYYY.json). Directory: $EGD_CACHE_DIR, else "
+        help="show or clear the local cache of OTE prices, ČNB rates and EG.D data",
+        description="Cached data: complete past delivery days of OTE prices (ote/YYYY-MM.json), "
+        "ČNB EUR/CZK fixings (cnb/YYYY.json) and final days of EG.D metering data "
+        "(egd/, EAN hashed, user-only permissions). Directory: $EGD_CACHE_DIR, else "
         "%LOCALAPPDATA%\\egd-api-client on Windows, else $XDG_CACHE_HOME/egd-api-client "
         "(~/.cache/egd-api-client).",
     )
@@ -217,6 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
     cc = csub.add_parser("clear", parents=[cache_common], help="delete cached data")
     cc.add_argument("--ote", action="store_true", help="only OTE prices")
     cc.add_argument("--cnb", action="store_true", help="only ČNB rates")
+    cc.add_argument("--egd", action="store_true", help="only EG.D metering data")
     cc.set_defaults(func=cmd_cache_clear)
     return parser
 

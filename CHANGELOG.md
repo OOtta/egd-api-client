@@ -69,10 +69,18 @@ First version, published as **egd-api-client** (command `egd`).
   year is refreshed at most once per day and only when a newer fixing is needed. Cache dir:
   `$EGD_CACHE_DIR`, `%LOCALAPPDATA%\egd-api-client` on Windows, else
   `$XDG_CACHE_HOME/egd-api-client` (`~/.cache/egd-api-client`, also on Termux).
-- `--refresh-cache` (download again and update the cache) next to `--no-cache`; new
-  `egd cache info` / `egd cache clear [--ote] [--cnb]` (both with `--json`). `egd spot
-  calc|prices|fx` print how many days came from the cache vs. were downloaded (suppressed
-  with `--json`; the JSON output has a `cache` object with the counts).
+- Persistent per-day cache of EG.D metering data (`egd spot calc`, `egd data`), per
+  metering point, profile and API variant: only final days are stored – exact number of
+  quarter-hours (92/96/100), all values with a final status, older than 7 days
+  (`--cache-final-after DAYS`, config `[egd] cache_final_after_days`; EG.D may revise recent
+  data). The resolved default profile and the first accessible day are remembered, so a fully
+  cached run sends no EG.D request at all (not even for the token). Privacy: the EAN is
+  neither in file names (HMAC-SHA256 with a random key in `egd/.key`) nor in contents (meta
+  keeps the last 4 digits only); cache directories are created `0700`, files `0600`.
+- `--refresh-cache` (download again and update the cache) next to `--no-cache`; new `egd
+  cache info` / `egd cache clear [--ote] [--cnb] [--egd]` (both with `--json`). `egd spot
+  calc|prices|fx` and `egd data` print how many days came from the cache vs. were downloaded
+  (suppressed with `--json`; the JSON output has a `cache` object with the counts).
 - CSV/XLSX consumption import with column, unit, timestamp-convention and DST detection.
 - Config file `~/.config/egd-api-client/config.toml` with `[egd]`, `[spot]`, `[spot.fixed]`
   sections; environment variables `EGD_CLIENT_ID`, `EGD_CLIENT_SECRET`, `EGD_EAN`,

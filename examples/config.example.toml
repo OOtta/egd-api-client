@@ -13,6 +13,7 @@ ean = "859182400xxxxxxxxx"
 # api_variant = "rest"      # "rest" (unified /rest/spotreby) or "c1-legacy" (/rest/c/spotreby)
 # timestamps = "start"      # do API timestamps mark the interval start or end?
 # test_env = false          # use test.distribuce24.cz
+# cache_final_after_days = 7  # cache EG.D data only for days older than this (EG.D may revise)
 
 # ---- `egd spot …` --------------------------------------------------------------
 [spot]

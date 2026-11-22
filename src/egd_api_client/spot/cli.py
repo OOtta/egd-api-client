@@ -51,7 +51,7 @@ class SpotContext(Context):
             "refresh": self.cache.refresh,
             "ote": self.ote.stats.as_dict(),
             "cnb": self.cnb.stats.as_dict(),
-        }
+        } | ({"egd": self.readings_cache.stats.as_dict()} if self.readings_cache else {})
 
     def report_cache(self) -> None:
         """Progress line: delivery days from the cache vs. downloaded (suppressed with --json)."""
@@ -167,7 +167,7 @@ def cmd_calc(args: argparse.Namespace) -> int:
         source = {"type": "file", "path": str(args.input), "readings": len(data.readings)}
     else:
         start, end = clamp_to_yesterday(*resolve_period(args))
-        info(f"Downloading EG.D data {start} – {end} ...", args.json)
+        info(f"EG.D data {start} – {end} ...", args.json)
         data = ctx.egd_readings(start, end)
         if data.available_from is not None:
             start = max(start, local_date(data.available_from))

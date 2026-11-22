@@ -149,6 +149,8 @@ class EgdClient:
         self.token_url = token_url or (TEST_TOKEN_URL if test_env else PROD_TOKEN_URL)
         self.data_url = (data_url or (TEST_DATA_URL if test_env else PROD_DATA_URL)).rstrip("/")
         self._token: str | None = None
+        #: HTTP requests sent (token + data), for progress/cache reporting
+        self.requests = 0
 
     # -- auth -------------------------------------------------------------------------------
     def token(self) -> str:
@@ -161,6 +163,7 @@ class EgdClient:
             "scope": SCOPE,
         }
         try:
+            self.requests += 1
             resp = self.session.post(self.token_url, json=payload, timeout=DEFAULT_TIMEOUT)
         except requests.RequestException as exc:
             raise EgdAuthError(f"Cannot reach EG.D token endpoint: {exc}") from exc
@@ -181,6 +184,7 @@ class EgdClient:
         url = f"{self.data_url}/{path.lstrip('/')}"
         for attempt in (1, 2):
             headers = {"Authorization": f"Bearer {self.token()}", "Accept": "application/json"}
+            self.requests += 1
             try:
                 resp = self.session.get(
                     url, params=params, headers=headers, timeout=DEFAULT_TIMEOUT

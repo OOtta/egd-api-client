@@ -17,7 +17,8 @@ from egd_api_client.config import Config, load_config
 from egd_api_client.http import make_session
 from egd_api_client.lowtariff import LowTariffError, LowTariffSchedule
 from egd_api_client.models import LoadResult
-from egd_api_client.timeutil import local_date, local_day_bounds_utc
+from egd_api_client.readings_cache import DEFAULT_FINAL_AFTER_DAYS, CachedReadings
+from egd_api_client.timeutil import local_date
 
 
 class CliError(Exception):
@@ -209,6 +210,13 @@ def egd_parser() -> argparse.ArgumentParser:
         choices=["start", "end"],
         help="whether API timestamps mark interval start or end (default: start)",
     )
+    e.add_argument(
+        "--cache-final-after",
+        type=int,
+        metavar="DAYS",
+        help="cache EG.D data only for days older than DAYS (EG.D may still revise recent "
+        f"data; default {DEFAULT_FINAL_AFTER_DAYS}, config [egd] cache_final_after_days)",
+    )
     return p
 
 
@@ -272,6 +280,7 @@ class Context:
             cache_dir = None
         else:
             cache_dir = Path(args.cache_dir) if args.cache_dir else default_cache_dir()
+        self.readings_cache: CachedReadings | None = None
         self.cache = JsonCache(
             cache_dir, warn=warn, refresh=bool(getattr(args, "refresh_cache", False))
         )
@@ -288,19 +297,36 @@ class Context:
         return EgdClient(self.session, EgdCredentials(cid, secret), test_env=test_env)
 
     def egd_readings(self, start: date, end: date, kind: Kind = "consumption") -> LoadResult:
+        """Readings for local days ``start``..``end``; final days come from the cache."""
         ean = self.args.ean or self.cfg.ean
         if not ean:
             raise CliError("No EAN given: use --ean, EGD_EAN or [egd] ean in the config file.")
-        t0, t1 = local_day_bounds_utc(start, end)
         profile = self.args.profile
         if profile is None and kind == "consumption":
             profile = self.cfg.egd.get("profile")
-        return self.egd().readings(
+        final_after = first(
+            getattr(self.args, "cache_final_after", None),
+            self.cfg.egd.get("cache_final_after_days"),
+            DEFAULT_FINAL_AFTER_DAYS,
+        )
+        self.readings_cache = CachedReadings(
+            self.cache, self.egd, final_after_days=int(final_after)
+        )
+        res = self.readings_cache.readings(
             str(ean),
-            t0,
-            t1,
+            start,
+            end,
             profile=profile,
             variant=self.args.api_variant or self.cfg.egd.get("api_variant", "rest"),
             timestamps=self.args.api_timestamps or self.cfg.egd.get("timestamps"),
             kind=kind,
+            test_env=bool(getattr(self.args, "test_env", False) or self.cfg.egd.get("test_env")),
         )
+        st = self.readings_cache.stats
+        how = (
+            f"{st.cached_days} day(s) from cache"
+            if self.cache.enabled and not self.cache.refresh
+            else ("cache refreshed" if self.cache.enabled else "cache disabled")
+        )
+        info(f"EG.D data: {how}, {st.downloaded_days} day(s) downloaded ({st.requests} request(s))")
+        return res

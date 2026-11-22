@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 #: cache namespaces written by this package (``hdo`` = removed feature, cleaned up by clear)
-NAMESPACES = ("ote", "cnb")
+NAMESPACES = ("ote", "cnb", "egd")
 LEGACY_NAMESPACES = ("hdo",)
 
 
@@ -83,7 +83,7 @@ class JsonCache:
             return
         path = self._path(namespace, key)
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
+            self.private_dir(path.parent)
             fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{key}.", suffix=".tmp")
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -95,6 +95,20 @@ class JsonCache:
                 raise
         except OSError as exc:  # read-only or full disk: keep working without the cache
             self.warn(f"Cannot write cache file {path} ({exc}).")
+
+    def private_dir(self, path: Path) -> None:
+        """Create ``path`` (and a missing cache root) readable by the user only (0700).
+
+        Files are created by ``mkstemp`` with mode 0600. On Windows the per-user
+        ``%LOCALAPPDATA%`` already restricts access; ``chmod`` there is a no-op.
+        """
+        assert self.directory is not None
+        root_existed = self.directory.exists()
+        path.mkdir(parents=True, exist_ok=True)
+        if os.name == "posix":
+            path.chmod(0o700)
+            if not root_existed:
+                self.directory.chmod(0o700)
 
     # -- maintenance --------------------------------------------------------------------------
     def info(self) -> dict[str, Any]:

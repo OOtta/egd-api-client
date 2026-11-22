@@ -25,7 +25,7 @@ Stejné funkce jsou k dispozici jako knihovna (`egd_api_client.EgdClient`,
 - [Rychlý start](#rychlý-start)
 - [Získání přístupu k API EG.D](#získání-přístupu-k-api-egd)
 - [Konfigurace](#konfigurace)
-  - [Mezipaměť (cache) cen OTE a kurzů ČNB](#mezipaměť-cache-cen-ote-a-kurzů-čnb)
+  - [Mezipaměť (cache) cen OTE, kurzů ČNB a dat EG.D](#mezipaměť-cache-cen-ote-kurzů-čnb-a-dat-egd)
 - [Příkazy](#příkazy)
 - [Použití jako knihovny](#použití-jako-knihovny)
 - [Jak se počítá cena](#jak-se-počítá-cena)
@@ -145,13 +145,15 @@ a `[distribution]` (distribuční poplatky); viz
 tajný klíč, nastavte mu `chmod 600` – jinak vás nástroj upozorní. Tajné údaje se nikdy
 nevypisují ani neukládají do mezipaměti; denní přístupový token je jen v paměti.
 
-### Mezipaměť (cache) cen OTE a kurzů ČNB
+### Mezipaměť (cache) cen OTE, kurzů ČNB a dat EG.D
 
-Spotové ceny OTE a kurzy ČNB se ukládají na disk, takže opakovaný výpočet za stejné období
-už nic nestahuje – stáhnou se jen dny, které v mezipaměti chybí. Průběh to hlásí řádkem
-(v režimu `--json` se nevypisuje, počty jsou v objektu `cache`):
+Spotové ceny OTE, kurzy ČNB i naměřená data EG.D se ukládají na disk, takže opakovaný
+výpočet za stejné období už nic nestahuje (ani nežádá o token) – stáhnou se jen dny, které
+v mezipaměti chybí. Průběh to hlásí řádky (v režimu `--json` se nevypisují, počty jsou
+v objektu `cache`):
 
 ```text
+EG.D data: 143 day(s) from cache, 0 day(s) downloaded (0 request(s))
 OTE prices: 143 day(s) from cache, 0 day(s) downloaded (0 request(s)); ČNB rates: 1 year(s) from cache, 0 downloaded
 ```
 
@@ -169,12 +171,20 @@ OTE prices: 143 day(s) from cache, 0 day(s) downloaded (0 request(s)); ČNB rate
   starší soubory se automaticky převedou), zápis je atomický. Poškozený soubor se ohlásí
   varováním (u `--json` v poli `warnings`) a data se stáhnou znovu.
 - **Volby:** `--no-cache` (nic nečíst ani neukládat), `--refresh-cache` (vše stáhnout znovu
-  a mezipaměť přepsat).
+  a mezipaměť přepsat) – platí pro ceny, kurzy i data EG.D.
 - **Správa:** `egd cache info` (umístění, počet souborů, dnů a velikost) a
-  `egd cache clear` (smazat vše, `--ote` / `--cnb` jen jednu část); obojí umí `--json`.
+  `egd cache clear` (smazat vše, `--ote` / `--cnb` / `--egd` jen jednu část); obojí umí `--json`.
 
-Naměřená data EG.D se neukládají nikdy (s `--input` je stačí stáhnout jednou přes
-`egd data`).
+- **Data EG.D (spotřeba/výroba):** po dnech, zvlášť pro každé odběrné místo, profil
+  a variantu API. Uloží se jen den, který má přesný počet čtvrthodin (92/96/100), všechny
+  hodnoty s finálním stavem a je starší než 7 dní – EG.D může nedávná data ještě opravit,
+  takže novější dny se stahují znovu. Hranici změníte volbou `--cache-final-after DNY` nebo
+  `cache_final_after_days` v sekci `[egd]`. Pamatuje se i automaticky zvolený profil
+  a první den, ke kterému máte přístup, takže plně uložené období nepotřebuje žádný dotaz.
+- **Soukromí:** EAN není v názvu souboru ani v obsahu (název obsahuje HMAC-SHA256 EAN
+  s náhodným klíčem uloženým v `egd/.key`, v metadatech jen poslední 4 číslice). Adresáře
+  se zakládají s právy `0700` a soubory `0600` (na Windows chrání data uživatelský profil
+  `%LOCALAPPDATA%`). Přihlašovací údaje ani token se neukládají nikdy.
 
 ## Příkazy
 
@@ -186,7 +196,7 @@ Naměřená data EG.D se neukládají nikdy (s `--input` je stačí stáhnout je
 | `egd spot calc` | výpočet ceny vaší spotřeby se spotovým tarifem (z API nebo ze souboru) |
 | `egd spot prices --currency czk\|eur` | stažení / souhrn / export spotových cen OTE (`-o .csv/.json`); `--currency` je povinná |
 | `egd spot fx` | kurz ČNB EUR/CZK použitý pro každý den dodávky (`-o .csv/.json`, `--json`) |
-| `egd cache info` / `egd cache clear` | obsah mezipaměti cen OTE a kurzů ČNB / její smazání (`--ote`, `--cnb`) |
+| `egd cache info` / `egd cache clear` | obsah mezipaměti (ceny OTE, kurzy ČNB, data EG.D) / její smazání (`--ote`, `--cnb`, `--egd`) |
 
 Všechny volby vypíše `egd PŘÍKAZ --help` / `egd spot PŘÍKAZ --help`. Společné volby:
 `--from`, `--to` (místní data, včetně; `RRRR-MM-DD` nebo `RRRR-MM` = celý měsíc), `--ean`,
@@ -551,7 +561,7 @@ src/egd_api_client/
   models.py          Reading, PricePoint, LoadResult
   cli.py             vstupní bod `egd` a základní příkazy (meters, profiles, data)
   cli_common.py      společné volby CLI, práce s obdobím, kontext
-  config.py, cache.py, timeutil.py, http.py
+  config.py, cache.py, readings_cache.py, timeutil.py, http.py
   spot/              funkce spotového tarifu (`egd spot …`)
     cli.py           příkazy calc, prices, fx
     ote.py           ceny denního trhu OTE (SOAP) s mezipamětí
